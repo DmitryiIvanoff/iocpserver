@@ -46,7 +46,6 @@ bool CIOCPMySQLServer::сtrlHandler(DWORD dwEvent) {
 CIOCPMySQLServer::CIOCPMySQLServer(int threadCount, std::string mySQLPosrt) :
 	m_hIOCP(INVALID_HANDLE_VALUE),
 	m_dThreadCount(threadCount),
-	//m_dListenSocket(INVALID_SOCKET),
 	m_dMySQLSocket(INVALID_SOCKET),
 	clientIOCP(INVALID_HANDLE_VALUE)
 {
@@ -74,15 +73,13 @@ CIOCPMySQLServer::CIOCPMySQLServer(int threadCount, std::string mySQLPosrt) :
 		m_vWorkerThread.push_back(std::move(std::make_shared<std::thread>(&CIOCPMySQLServer::workerThread, this)));
 	}
 
-	//The socket function creates a socket that is bound to a specific transport service provider.
-	//@param1 AF_INET - The Internet Protocol version 4 (IPv4) address family. 
-	//@param2 SOCK_STREAM use TCP protocol
-	//@param3 If a value of 0 is specified, the caller does not wish to specify a protocol and the service provider will choose the protocol to use.
-	m_dMySQLSocket = CreateSocket(mySQLPosrt, false);// socket(AF_INET, SOCK_STREAM, 0);
+	m_dMySQLSocket = CreateSocket(mySQLPosrt);
 	if (!m_dMySQLSocket)
 	{
 		return;
 	}
+
+	m_pLogger = CLogger::GetLogger();
 	
 	currentServer = this;
 }
@@ -98,7 +95,7 @@ CIOCPMySQLServer::~CIOCPMySQLServer() {
 		}
 	}
 
-	//Проверяем выполняются ли еще потоки, если нет то аттачим их к главному треду чтобы синхронно и безопасно удалить их.
+	//Проверяем выполняются ли еще потоки, если нет то аттачим их к главному треду чтобы синхронно и безопасно завершить их.
 	for (auto it = m_vWorkerThread.begin(); it != m_vWorkerThread.end(); ++it) {
 
 		if (it->get()->joinable() && WaitForSingleObject(it->get()->native_handle(), 500) == WAIT_OBJECT_0) {
@@ -110,43 +107,31 @@ CIOCPMySQLServer::~CIOCPMySQLServer() {
 		}
 
 	}
-	////не используем итераторы для динамически изменяемого контейнера, иначе м.б. ошибка когда итератор == nullptr
-	//for (size_t i = 0; i < m_vContexts.size(); i++) {
-	//	removeIOContext(m_vContexts[i]);
-	//}
-	//m_vContexts.clear();
 
 	if (m_hIOCP) {
 		CloseHandle(m_hIOCP);
 		m_hIOCP = nullptr;
 	}
 
-	////завершаем цикл в котором обрабатываются новые клиентские соединения (Если цикл остановился на блокирующем вызове WSAAccept)
-	//if (m_dListenSocket != INVALID_SOCKET) {
-	//	closesocket(m_dListenSocket);
-	//	m_dListenSocket = INVALID_SOCKET;
-	//}
-
 	WSACleanup();
 	SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CIOCPMySQLServer::сtrlHandler), false);
 }
 
 //Инициализируем сокет, который будет слушать порт к которому будут коннектиться клиенты.
-SOCKET CIOCPMySQLServer::CreateSocket(std::string port, bool isListenSocket) {
+SOCKET CIOCPMySQLServer::CreateSocket(std::string port) {
 
 	SOCKET socket;
 
 	struct addrinfo hints = { 0 };
 	struct addrinfo *addrlocal;
 
-	//AI_PASSIVE - назначить сокету адрес моего хоста (сетевой адрес структуры не будет указан). Используется для серверных сокетов
-	hints.ai_flags = isListenSocket ? AI_PASSIVE : AI_NUMERICHOST;//AI_NUMERICHOST - для того чтобы ваершарк смог трейсить пакеты между прокси и мускулом
+	hints.ai_flags = AI_NUMERICHOST;//AI_NUMERICHOST - для того чтобы ваершарк смог трейсить пакеты между прокси и мускулом
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_IP;
 
 	//конвертим адресс. В этом методе аллоцируется память для указателя addrlocal. 
-	if (getaddrinfo(isListenSocket ? nullptr : "127.0.0.1", port.c_str(), &hints, &addrlocal) != 0 || !addrlocal) {
+	if (getaddrinfo("127.0.0.1", port.c_str(), &hints, &addrlocal) != 0 || !addrlocal) {
 		std::cout << "MySQL: getaddrinfo() failed with error " << WSAGetLastError() << std::endl;
 		return NULL;
 	}
@@ -157,7 +142,12 @@ SOCKET CIOCPMySQLServer::CreateSocket(std::string port, bool isListenSocket) {
 		return NULL;
 	}
 
+	const char chOpt = 1;
+	if ((setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, &chOpt, sizeof(char))) == SOCKET_ERROR) {
+		std::cout << "setsockopt failed: " << WSAGetLastError() << std::endl;
+		return NULL;
 
+	}
 	if (connect(socket, addrlocal->ai_addr, (int)addrlocal->ai_addrlen) < 0)
 	{
 		std::cout << "MySQL:  error " << WSAGetLastError() << " in connect" << std::endl;
@@ -194,24 +184,15 @@ int CIOCPMySQLServer::workerThread(LPVOID WorkThreadContext) {
 		bSuccess = GetQueuedCompletionStatus(hIOCP, &dwIoSize, reinterpret_cast<PDWORD_PTR>(&lpPerSocketContext), &lpOverlapped, INFINITE);
 
 		if (!bSuccess || (bSuccess && (dwIoSize == 0))) {
-			//соединение с клиентом разорвано
 			//server->removeIOContext(lpPerSocketContext);
 			continue;
 		}
 
 		if (!lpPerSocketContext.get() || !lpPerSocketContext->m_pIOContext.get()) {
 
-			//
-			// CTRL-C handler used PostQueuedCompletionStatus to post an I/O packet with
-			// a nullptr CompletionKey (or if we get one for any reason).  It is time to exit.
-			//
 			break;
 		}
 
-		//
-		// determine what type of IO packet has completed by checking the CIOContext 
-		// associated with this socket.  This will determine what action to take.
-		//
 		lpIOContext = lpPerSocketContext->m_pIOContext;
 		if (!lpIOContext) {
 			//клиент дропнул соединение:
@@ -219,163 +200,94 @@ int CIOCPMySQLServer::workerThread(LPVOID WorkThreadContext) {
 		}
 		//lpIOContext->nTotalBytes = dwIoSize;
 		
-		//if (lpIOContext->IOOperation == AcceptClient || lpIOContext->IOOperation == ReadFromClient) {
-		std::lock_guard<std::mutex> lock(server->m_mContextsSync);
-
-		std::cout << "IOCP rec: " << lpIOContext->buffer << " ,bytes: " << dwIoSize << std::endl;
-			lpIOContext->IOOperation = ReadFromClient;
-			if (!server->SendBuffer(server->m_dMySQLSocket, lpIOContext, lpPerSocketContext->m_dSessionId)) {
-				std::cout << "MySQL[" << std::this_thread::get_id() << "]: Send failed: " << WSAGetLastError() << std::endl;;
-				//server->removeIOContext(lpPerSocketContext);
-				continue;
-			}
-
-			
-			//читаем ответ
-			if (!server->RecvBuffer(server->m_dMySQLSocket, lpIOContext, lpPerSocketContext->m_dSessionId)) {
-				std::cout << "MySQL[" << std::this_thread::get_id() << "]: Receive failed: " << WSAGetLastError() << std::endl;
-				//server->removeIOContext(lpPerSocketContext);
-				continue;
-			}
+		switch (lpIOContext->IOOperation) {
+		case WriteToClient:
+			std::cout << "Incorrect sequence" << std::endl;
+			break;
+		case AcceptClient:
+			//клиент подключился -  коннектимся к БД, читаем запрос и шлем клиенту ч/з клиентскую рутину.
+			lpIOContext->m_dMySQLSocket = server->CreateSocket("3306");
 			lpIOContext->IOOperation = SendToClient;
-			server->postContextToIOCP(lpPerSocketContext.get());			
-		//}
+
+			if (!lpIOContext->m_dMySQLSocket)
+			{
+				std::cout << "Error..." << std::endl;
+				break;
+			}
+			server->RecvBuffer(lpIOContext->m_dMySQLSocket, lpPerSocketContext->m_pIOContext);
+
+			server->PostToIOCP(lpPerSocketContext.get());
+
+			break;
+
+		case ReadFromClient:
+			//считали ответ от клиента - шлем его в БД, читаем ответ и шлем обратно ч/з клиентскую рутину
+			//lpIOContext->nTotalBytes = dwIoSize;
+			lpIOContext->IOOperation = SendToClient;
+
+			server->m_pLogger->Write(lpIOContext->buffer, lpIOContext->nTotalBytes);
+
+			if (!server->SendBuffer(lpIOContext->m_dMySQLSocket, lpIOContext)) {
+				std::cout << "MySQL[" << std::this_thread::get_id() << "]: Send failed: " << WSAGetLastError() << std::endl;;
+				//server->RemoveSession(lpPerSocketContext);
+			}
+
+			if (!server->RecvBuffer(lpIOContext->m_dMySQLSocket, lpIOContext)) {
+				std::cout << "MySQL[" << std::this_thread::get_id() << "]: Receive failed: " << WSAGetLastError() << std::endl;
+				//server->RemoveSession(lpPerSocketContext);
+			}
+
+			server->PostToIOCP(lpPerSocketContext.get());
+			break;
+		case SendToClient:
+			std::cout << "Incorrect sequence" << std::endl;
+			break;
+		}
 	}
 	std::cout << "Thread ended" << std::endl;
 	return 0;
 }
 
-bool CIOCPMySQLServer::postContextToIOCP(CClientContext* lpPerSocketContext) {
+bool CIOCPMySQLServer::PostToIOCP(CClientContext* lpPerSocketContext) {
 	
 	size_t size = sizeof(*lpPerSocketContext);
 	return PostQueuedCompletionStatus(clientIOCP, size, (DWORD)(lpPerSocketContext), &(lpPerSocketContext->m_pIOContext->overlapped));
 
 }
 
-bool CIOCPMySQLServer::RecvBuffer(SOCKET recvSocket, IOContextPtr data, size_t id) {
-	//std::cout << "mysql[" << id << "] recvBuffer socket[" << recvSocket << "]" << std::endl;
+bool CIOCPMySQLServer::RecvBuffer(SOCKET recvSocket, IOContextPtr data) {
+
 	DWORD dwFlags = 0;
-	DWORD dRecvTotalBytes = 0;
 	LPWSABUF buffRecv = &data->wsabuf;
-	//указатель на начало буфера
+
 	buffRecv->buf = data->buffer;
 	buffRecv->len = MAX_BUFF_SIZE;
-	std::fill(buffRecv->buf, buffRecv->buf + MAX_BUFF_SIZE, 0);
 
+	while ((data->nTotalBytes = recv(recvSocket, buffRecv->buf, buffRecv->len, dwFlags)) == MAX_BUFF_SIZE) {
 
-	data->nTotalBytes = recv(recvSocket, buffRecv->buf, buffRecv->len, dwFlags);
+		m_pLogger->Write(data->buffer, data->nTotalBytes);
 
-	std::cout << "Recv: " << buffRecv->buf << std::endl;
-	
+		//напрямую пишем в сокет клиента большие данные
+		if (!SendBuffer(data->m_dClientSocket, data)) {
+			break;
+		}
+
+		buffRecv->buf = data->buffer;
+	}
+
+	m_pLogger->Write(data->buffer, data->nTotalBytes);
+
 	return true;
 }
 
-bool CIOCPMySQLServer::SendBuffer(SOCKET sendSocket, IOContextPtr data, size_t id) {
+bool CIOCPMySQLServer::SendBuffer(SOCKET sendSocket, IOContextPtr data) {
 
-	
 	LPWSABUF buffSend = &data->wsabuf;
 	buffSend->buf = data->buffer;
 	buffSend->len = data->nTotalBytes;
 	DWORD dwFlags = 0;
-	int dSendedBytes = send(sendSocket, buffSend->buf, buffSend->len, dwFlags);
+	//send(sendSocket, buffSend->buf, buffSend->len, dwFlags);
 
-	std::cout << "Send: " << buffSend->buf << " ,bytes: " << dSendedBytes << std::endl;
+	return (send(sendSocket, buffSend->buf, buffSend->len, dwFlags) != SOCKET_ERROR);
 
-	return true;
 }
-
-bool CIOCPMySQLServer::WSArecvBuffer(SOCKET recvSocket, IOContextPtr data, size_t id) {
-	std::cout << "mysql["<<id<<"] WSArecvBuffer socket[" << recvSocket << "]" << std::endl;
-	//указатель на overlapped
-	LPWSAOVERLAPPED pOverlapped = &data->overlapped;
-	ZeroMemory(pOverlapped, sizeof(WSAOVERLAPPED));
-
-	DWORD dwFlags = 0;
-	LPWSABUF buffRecv = &data->wsabuf;
-	//ставим указатель на началло буфера
-	buffRecv->buf = data->buffer;
-	buffRecv->len = MAX_BUFF_SIZE;
-	std::fill(buffRecv->buf, buffRecv->buf + MAX_BUFF_SIZE, 0);
-
-	if (WSARecv(recvSocket, buffRecv, 1, nullptr, &dwFlags, pOverlapped, nullptr) == SOCKET_ERROR
-		&& (ERROR_IO_PENDING != WSAGetLastError())) {
-		std::cout << "MySQL: WSArecvBuffer: error " << WSAGetLastError() << " in receive" << std::endl;
-		return false;
-	}
-
-	//количество полученных байт хранится в структуре overlapped
-	data->nTotalBytes = pOverlapped->InternalHigh;
-	return true;
-}
-
-bool CIOCPMySQLServer::WSASendBuffer(SOCKET sendSocket, IOContextPtr data, size_t id) {
-	std::cout << "mysql["<<id<<"] WSASendBuffer socket[" << sendSocket << "]" << std::endl;
-	//указатель на overlapped
-	LPWSAOVERLAPPED pOverlapped = &data->overlapped;
-
-	DWORD dwFlags = 0;
-	LPWSABUF buffSend = &data->wsabuf;
-	buffSend->buf = data->buffer;
-	buffSend->len = data->nTotalBytes;
-
-	if (WSASend(sendSocket, buffSend, 1, nullptr, dwFlags, pOverlapped, nullptr) == SOCKET_ERROR
-		&& (ERROR_IO_PENDING != WSAGetLastError())) {
-		std::cout << "MySQL: WSASendBuffer: error " << WSAGetLastError() << " in send" << std::endl;
-		return false;
-	}
-	return true;
-}
-
-//Аллоцирует контекст для сокета и связывает сокет с портом завершения.
-void CIOCPMySQLServer::UpdateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation) {
-
-	//
-	// Allocate a socket context for the new connection.  
-	//
-	context.reset(new CClientContext(sdClient, sdMySQL, operation));
-	if (!context) {
-		return;
-	}
-
-	//свзыввем хендл сокета клиента с портом завершения, иными словами оповещаем порт завершения о том что хотим наблюдать за этим сокетом
-	m_hIOCP = CreateIoCompletionPort(reinterpret_cast<HANDLE>(sdClient), m_hIOCP, reinterpret_cast<DWORD_PTR>(context.get()), 0);
-	if (!m_hIOCP) {
-		std::cout << "MySQL: CreateIoCompletionPort() failed: " << GetLastError() << std::endl;
-		context.reset();
-		return;
-	}
-
-	AddIOContext(context);
-}
-
-//
-//  Add a client connection context structure to the global list of context structures.
-//
-void CIOCPMySQLServer::AddIOContext(ClientContextPtr lpPerSocketContext) {
-
-	std::lock_guard<std::mutex> lock(m_mContextsSync);
-	//Добавляем копию контекста в вектор, количество ссылок в умном указателе увеличивается на 1 и будет равно 2, когда мы получим новое клиентское сединение в Run,
-	//то количество ссылок уменьшится на 1, когда клиент разорвет соединение то объект уничтожится.
-	m_vContexts.push_back(std::move(lpPerSocketContext));
-
-	return;
-}
-
-//
-void CIOCPMySQLServer::RemoveIOContext(ClientContextPtr lpPerSocketContext) {
-
-
-	std::lock_guard<std::mutex> lock(m_mContextsSync);
-
-	auto it = std::find(m_vContexts.begin(), m_vContexts.end(), lpPerSocketContext);
-
-	if (it != m_vContexts.end()) {
-
-		it->reset();
-		m_vContexts.erase(it);
-	}
-
-
-	return;
-}
-

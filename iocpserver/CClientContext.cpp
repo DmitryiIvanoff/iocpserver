@@ -1,8 +1,8 @@
 #include "CClientContext.h"
 
-CClientContext::CClientContext(SOCKET clientSocket, SOCKET mySQLSocket, etIOOperation operationId) {
+CClientContext::CClientContext(SOCKET clientSocket) {
 
-	m_pIOContext.reset(new CIOContext(clientSocket, mySQLSocket, operationId));
+	m_pIOContext.reset(new CIOContext(clientSocket));
 }
 
 

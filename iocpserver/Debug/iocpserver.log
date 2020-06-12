@@ -1,10 +1,2 @@
-﻿  CClientContext.cpp
-  CIOCPClientServer.Cpp
-  CIOCPMySQLServer.cpp
-  CLogger.cpp
-c:\users\username\desktop\myprojects\tcp_proxy\iocp_server\iocpserver\iocpserver\clogger.cpp(63): warning C4018: >: несоответствие типов со знаком и без знака
-  CParser.cpp
-  IOCPProxyLoggingServer.cpp
-  iocpserver.cpp
-  Создание кода...
+﻿  iocpserver.cpp
   iocpserver.vcxproj -> C:\Users\username\Desktop\MyProjects\TCP_proxy\IOCP_server\iocpserver\Debug\iocpserver.exe

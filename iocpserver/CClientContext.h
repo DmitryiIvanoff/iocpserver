@@ -16,11 +16,11 @@ enum etIOOperation {
 
 struct CIOContext {
 	CIOContext() = delete;
-	CIOContext(SOCKET clientSocket, SOCKET mySQLSocket, etIOOperation operationId) :nTotalBytes(0),
+	CIOContext(SOCKET clientSocket) :nTotalBytes(0),
 		nSentBytes(0),
-		IOOperation(operationId),
+		IOOperation(AcceptClient),
 		m_dClientSocket(clientSocket),
-		m_dMySQLSocket(mySQLSocket)
+		m_dMySQLSocket(INVALID_SOCKET)
 	{
 		overlapped.Internal = 0;
 		overlapped.InternalHigh = 0;
@@ -85,7 +85,7 @@ struct CClientContext {
 public:
 	CClientContext() = delete;
 
-	CClientContext(SOCKET clientSocket, SOCKET mySQLSocket, etIOOperation operationId);
+	CClientContext(SOCKET clientSocket);
 	~CClientContext();
 
 	size_t m_dSessionId;

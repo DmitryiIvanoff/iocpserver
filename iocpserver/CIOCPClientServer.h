@@ -13,8 +13,8 @@ public:
 	CIOCPClientServer(int threadCount, const std::string listenPort, const std::string mySQLIOCP = "3306");
 
 	~CIOCPClientServer();
+	
 	//¬ этом методе происходит обработка новых срединений от клиентов.
-
 	void Start();
 
 	void SetHelperIOCP(HANDLE compPort) { m_hMySQLIOCP = compPort; }
@@ -31,23 +31,23 @@ private:
 
 	static int WorkerThread(LPVOID WorkContext);
 
-	void UpdateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation);
+	void UpdateCompletionPort(ClientContextPtr& context, SOCKET sdClient);
 
 	bool PostToIOCP(CClientContext* lpPerSocketContext);
 
-	bool RecvBufferAsync(SOCKET recvSocket, IOContextPtr buffer, size_t id);
-	bool SendBufferAsync(SOCKET recvSocket, IOContextPtr buffer, size_t id);
+	bool RecvBufferAsync(IOContextPtr buffer);
+	bool SendBufferAsync(IOContextPtr buffer);
 
-	bool RecvBuffer(SOCKET recvSocket, IOContextPtr buffer, size_t id);
-	bool SendBuffer(SOCKET sendSocket, IOContextPtr buffer, size_t id);
+	bool RecvBuffer(SOCKET recvSocket, IOContextPtr buffer);
+	bool SendBuffer(SOCKET sendSocket, IOContextPtr buffer);
 
-	IOContextPtr GetNextBuffer(IOContextPtr buffer);
+	IOContextPtr GetNextBuffer();
 
 	void AddBufferInQueue(IOContextPtr& buffer);
 
 	void RemoveBufferFromQueue(IOContextPtr buffer);
 
-	IOContextPtr ProcessNextBuffer(IOContextPtr buffer);
+	IOContextPtr ProcessNextBuffer();
 	//обработчик событий консоли
 	static bool ConsoleEventHandler(DWORD dwEvent);
 

@@ -4,6 +4,7 @@
 #include <memory>
 #include <winsock2.h>
 #include "IServer.h"
+#include "CLogger.h"
 
 class CIOCPMySQLServer : public IServer
 {
@@ -14,26 +15,19 @@ public:
 
 	void SetHelperIOCP(HANDLE compPort) { clientIOCP = compPort; }
 
-	HANDLE getIOCP() { return m_hIOCP; }
+	HANDLE GetIOCP() { return m_hIOCP; }
 
 private:
 	static int workerThread(LPVOID WorkContext);
 
-	SOCKET CreateSocket(std::string port, bool isListenSocket);// override;
+	SOCKET CreateSocket(std::string port);
 
-	void UpdateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation);// override;
+	void UpdateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation);
 
-	void RemoveIOContext(ClientContextPtr lpPerSocketContext);// override;
+	bool PostToIOCP(CClientContext* lpPerSocketContext);
 
-	void AddIOContext(ClientContextPtr lpPerSocketContext);// override;
-	bool postContextToIOCP(CClientContext* lpPerSocketContext);
-
-	//bool postContextToIOCP(ClientContextPtr lpPerSocketContext) override { return true; };
-
-	bool WSASendBuffer(SOCKET sendSocket, IOContextPtr data, size_t id);
-	bool WSArecvBuffer(SOCKET recvSocket, IOContextPtr data, size_t id);
-	bool RecvBuffer(SOCKET recvSocket, IOContextPtr data, size_t id);// override;
-	bool SendBuffer(SOCKET sendSocket, IOContextPtr data, size_t id);// override;
+	bool RecvBuffer(SOCKET recvSocket, IOContextPtr data);
+	bool SendBuffer(SOCKET sendSocket, IOContextPtr data);
 
 private:
 	//обработчик событий консоли
@@ -58,6 +52,8 @@ private:
 
 	//для работы с mySQL:
 	SOCKET m_dMySQLSocket;
+
+	LoggerPtr m_pLogger;
 };
 
 typedef std::shared_ptr<CIOCPMySQLServer> IOCPMySQLServerPtr;

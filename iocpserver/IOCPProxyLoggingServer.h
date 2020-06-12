@@ -13,6 +13,6 @@ public:
 
 private:
 	IOCPClientServerPtr clientServer;
-	//IOCPMySQLServerPtr mySQLServer;
+	IOCPMySQLServerPtr mySQLServer;
 	std::thread threadClientServer;
 };
