@@ -3,8 +3,7 @@
 #include <memory>
 #include <mutex>
 
-#define MAX_BUFF_SIZE   8192
-
+constexpr auto MAX_BUFF_SIZE = 8192;
 
 enum etIOOperation {
 	AcceptClient,
@@ -50,10 +49,10 @@ struct CIOContext {
 			m_dMySQLSocket = INVALID_SOCKET;
 		}
 
-		while (!m_mClientGuard.try_lock()) {
+		while (!m_mClientSync.try_lock()) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
-		m_mClientGuard.unlock();
+		m_mClientSync.unlock();
 	}
 	///структура WSAOVERLAPPED для асинхронных операций с ссокетом
 	WSAOVERLAPPED               overlapped;	
@@ -76,7 +75,7 @@ struct CIOContext {
 	//
 	SOCKET m_dMySQLSocket;
 
-	std::mutex m_mClientGuard;
+	std::mutex m_mClientSync;
 };
 typedef std::shared_ptr<CIOContext> IOContextPtr;
 
@@ -88,7 +87,8 @@ public:
 
 	CClientContext(SOCKET clientSocket, SOCKET mySQLSocket, etIOOperation operationId);
 	~CClientContext();
-	size_t clientId;
+
+	size_t m_dSessionId;
 
 	IOContextPtr  m_pIOContext;
 };

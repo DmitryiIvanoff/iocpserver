@@ -78,7 +78,7 @@ CIOCPMySQLServer::CIOCPMySQLServer(int threadCount, std::string mySQLPosrt) :
 	//@param1 AF_INET - The Internet Protocol version 4 (IPv4) address family. 
 	//@param2 SOCK_STREAM use TCP protocol
 	//@param3 If a value of 0 is specified, the caller does not wish to specify a protocol and the service provider will choose the protocol to use.
-	m_dMySQLSocket = createSocket(mySQLPosrt, false);// socket(AF_INET, SOCK_STREAM, 0);
+	m_dMySQLSocket = CreateSocket(mySQLPosrt, false);// socket(AF_INET, SOCK_STREAM, 0);
 	if (!m_dMySQLSocket)
 	{
 		return;
@@ -132,7 +132,7 @@ CIOCPMySQLServer::~CIOCPMySQLServer() {
 }
 
 //Инициализируем сокет, который будет слушать порт к которому будут коннектиться клиенты.
-SOCKET CIOCPMySQLServer::createSocket(std::string port, bool isListenSocket) {
+SOCKET CIOCPMySQLServer::CreateSocket(std::string port, bool isListenSocket) {
 
 	SOCKET socket;
 
@@ -220,11 +220,11 @@ int CIOCPMySQLServer::workerThread(LPVOID WorkThreadContext) {
 		//lpIOContext->nTotalBytes = dwIoSize;
 		
 		//if (lpIOContext->IOOperation == AcceptClient || lpIOContext->IOOperation == ReadFromClient) {
-		std::lock_guard<std::mutex> lock(server->m_mContextsGuard);
+		std::lock_guard<std::mutex> lock(server->m_mContextsSync);
 
 		std::cout << "IOCP rec: " << lpIOContext->buffer << " ,bytes: " << dwIoSize << std::endl;
 			lpIOContext->IOOperation = ReadFromClient;
-			if (!server->sendBuffer(server->m_dMySQLSocket, lpIOContext, lpPerSocketContext->clientId)) {
+			if (!server->SendBuffer(server->m_dMySQLSocket, lpIOContext, lpPerSocketContext->m_dSessionId)) {
 				std::cout << "MySQL[" << std::this_thread::get_id() << "]: Send failed: " << WSAGetLastError() << std::endl;;
 				//server->removeIOContext(lpPerSocketContext);
 				continue;
@@ -232,7 +232,7 @@ int CIOCPMySQLServer::workerThread(LPVOID WorkThreadContext) {
 
 			
 			//читаем ответ
-			if (!server->recvBuffer(server->m_dMySQLSocket, lpIOContext, lpPerSocketContext->clientId)) {
+			if (!server->RecvBuffer(server->m_dMySQLSocket, lpIOContext, lpPerSocketContext->m_dSessionId)) {
 				std::cout << "MySQL[" << std::this_thread::get_id() << "]: Receive failed: " << WSAGetLastError() << std::endl;
 				//server->removeIOContext(lpPerSocketContext);
 				continue;
@@ -252,7 +252,7 @@ bool CIOCPMySQLServer::postContextToIOCP(CClientContext* lpPerSocketContext) {
 
 }
 
-bool CIOCPMySQLServer::recvBuffer(SOCKET recvSocket, IOContextPtr data, size_t id) {
+bool CIOCPMySQLServer::RecvBuffer(SOCKET recvSocket, IOContextPtr data, size_t id) {
 	//std::cout << "mysql[" << id << "] recvBuffer socket[" << recvSocket << "]" << std::endl;
 	DWORD dwFlags = 0;
 	DWORD dRecvTotalBytes = 0;
@@ -270,7 +270,7 @@ bool CIOCPMySQLServer::recvBuffer(SOCKET recvSocket, IOContextPtr data, size_t i
 	return true;
 }
 
-bool CIOCPMySQLServer::sendBuffer(SOCKET sendSocket, IOContextPtr data, size_t id) {
+bool CIOCPMySQLServer::SendBuffer(SOCKET sendSocket, IOContextPtr data, size_t id) {
 
 	
 	LPWSABUF buffSend = &data->wsabuf;
@@ -327,7 +327,7 @@ bool CIOCPMySQLServer::WSASendBuffer(SOCKET sendSocket, IOContextPtr data, size_
 }
 
 //Аллоцирует контекст для сокета и связывает сокет с портом завершения.
-void CIOCPMySQLServer::updateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation) {
+void CIOCPMySQLServer::UpdateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation) {
 
 	//
 	// Allocate a socket context for the new connection.  
@@ -345,15 +345,15 @@ void CIOCPMySQLServer::updateCompletionPort(ClientContextPtr& context, SOCKET sd
 		return;
 	}
 
-	addIOContext(context);
+	AddIOContext(context);
 }
 
 //
 //  Add a client connection context structure to the global list of context structures.
 //
-void CIOCPMySQLServer::addIOContext(ClientContextPtr lpPerSocketContext) {
+void CIOCPMySQLServer::AddIOContext(ClientContextPtr lpPerSocketContext) {
 
-	std::lock_guard<std::mutex> lock(m_mContextsGuard);
+	std::lock_guard<std::mutex> lock(m_mContextsSync);
 	//Добавляем копию контекста в вектор, количество ссылок в умном указателе увеличивается на 1 и будет равно 2, когда мы получим новое клиентское сединение в Run,
 	//то количество ссылок уменьшится на 1, когда клиент разорвет соединение то объект уничтожится.
 	m_vContexts.push_back(std::move(lpPerSocketContext));
@@ -362,10 +362,10 @@ void CIOCPMySQLServer::addIOContext(ClientContextPtr lpPerSocketContext) {
 }
 
 //
-void CIOCPMySQLServer::removeIOContext(ClientContextPtr lpPerSocketContext) {
+void CIOCPMySQLServer::RemoveIOContext(ClientContextPtr lpPerSocketContext) {
 
 
-	std::lock_guard<std::mutex> lock(m_mContextsGuard);
+	std::lock_guard<std::mutex> lock(m_mContextsSync);
 
 	auto it = std::find(m_vContexts.begin(), m_vContexts.end(), lpPerSocketContext);
 

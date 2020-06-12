@@ -9,13 +9,13 @@
 
 extern bool g_bEndServer;// set to TRUE on CTRL-C
 CIOCPClientServer* CIOCPClientServer::currentServer = nullptr;
-int CIOCPClientServer::clientID = 0;
+size_t CIOCPClientServer::m_dSessionId = 0;
 
 //
 //  Intercept CTRL-C or CTRL-BRK events and cause the server to initiate shutdown.
 //  CTRL-BRK resets the restart flag, and after cleanup the server restarts.
 //
-bool CIOCPClientServer::сtrlHandler(DWORD dwEvent) {
+bool CIOCPClientServer::ConsoleEventHandler(DWORD dwEvent) {
 
 	SOCKET sockTemp = INVALID_SOCKET;
 
@@ -29,7 +29,7 @@ bool CIOCPClientServer::сtrlHandler(DWORD dwEvent) {
 		}
 
 		if (currentServer->m_hIOCP) {
-			for (size_t i = 0; i < currentServer->m_vWorkerThread.size(); i++) {
+			for (size_t i = 0; i < currentServer->m_vWorkerPayloads.size(); i++) {
 				PostQueuedCompletionStatus(currentServer->m_hIOCP, 0, 0, nullptr);
 			}
 		}
@@ -51,24 +51,48 @@ bool CIOCPClientServer::сtrlHandler(DWORD dwEvent) {
 	}
 	return true;
 }
+/*
 
-CIOCPClientServer::CIOCPClientServer(int threadCount, std::string port, std::string mySQLPort):
-	m_hIOCP(INVALID_HANDLE_VALUE),
-	m_dThreadCount(threadCount),
+//количество потоков которое создаст класс
+
+
+
+std::map<size_t, IOContextPtr> m_mBuffer;
+std::vector<size_t> m_vRemovedBufferNumbers;
+//контейнер для хранения данных, связанных с каждым вновь подключенным клиентом. Контекст хранится в контейнере в течении сессии.
+std::vector<ClientContextPtr> m_vConnectedClients;
+//контейнер для рабочих потоков
+std::vector<std::shared_ptr<std::thread>> m_vWorkerPayloads;
+
+//мьютекс для безопасного добавления и удаления из контейнера
+std::mutex m_mContextsSync;
+std::mutex m_mThreadSync;
+
+//указатель на себя, нужен для сtrlHandler
+static CIOCPClientServer* currentServer;
+static size_t m_dSessionId;
+
+LoggerPtr m_pLogger;
+*/
+CIOCPClientServer::CIOCPClientServer(int threadCount, const std::string port, const std::string mySQLPort) :
 	m_dListenSocket(INVALID_SOCKET),
+	m_dMySQLSocket(INVALID_SOCKET),
+	m_dThreadCount(threadCount),
 	m_dIncomingSequence(0),
-	m_dOutgoingSequence(1)
+	m_dOutgoingSequence(1),
+	m_hIOCP(INVALID_HANDLE_VALUE),
+	m_hMySQLIOCP(INVALID_HANDLE_VALUE)
 {
 	WSADATA wsaData;
 		
-	if (!SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CIOCPClientServer::сtrlHandler), true)) {
+	if (!SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CIOCPClientServer::ConsoleEventHandler), true)) {
 		std::cout << "SetConsoleCtrlHandler() failed to install console handler:" << GetLastError() << std::endl;
 		return;
 	}
-	//инициализируем использование winsocks dll процессом.
+
 	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
 		std::cout << "WSAStartup() failed" << std::endl;
-		SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CIOCPClientServer::сtrlHandler), false);
+		SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CIOCPClientServer::ConsoleEventHandler), false);
 		return;
 	}
 
@@ -78,32 +102,29 @@ CIOCPClientServer::CIOCPClientServer(int threadCount, std::string port, std::str
 		return;
 	}
 
-	m_dListenSocket = createSocket(port, true);
+	m_dListenSocket = CreateSocket(port, true);
 	if (!m_dListenSocket) {
 		return;
 	}
 
-	/*m_dMySQLSocket = createSocket(mySQLPort, false);
-	if (!m_dMySQLSocket)
-	{
-		return;
-	}*/
-	//updateCompletionPort(mysqlPointer, m_dMySQLSocket, AcceptClient);
-	
-	for (int i = 0; i < m_dThreadCount; i++) {
-		m_vWorkerThread.push_back(std::move(std::make_shared<std::thread>(&CIOCPClientServer::workerThread, this)));
+	std::shared_ptr<std::thread> workThread;
+	for (size_t i = 0; i < m_dThreadCount; i++) {
+
+		workThread = std::make_shared<std::thread>(&CIOCPClientServer::WorkerThread, this);
+
+		m_vWorkerPayloads.push_back(std::move(workThread));
 	}	
+
+	m_pLogger = CLogger::GetLogger();
 
 	currentServer = this;
 }
 
-void CIOCPClientServer::start() {
+void CIOCPClientServer::Start() {
 
 	SOCKET sdClient = INVALID_SOCKET;
 	SOCKET adMySQL = INVALID_SOCKET;
 	ClientContextPtr lpPerSocketContext = nullptr;
-	DWORD dwRecvNumBytes = 0;
-	DWORD dwFlags = 0;
 
 	g_bEndServer = false;
 
@@ -123,23 +144,23 @@ void CIOCPClientServer::start() {
 			break;
 		}
 
-		adMySQL = createSocket("3306", false);
+		adMySQL = CreateSocket("3306", false);
 		if (!adMySQL)
 		{
-			return;
+			break;
 		}
 			
 		//связываем сокет клиента с портом завершения , аллоцируем структуру и добавляем ее в контейнер
-		updateCompletionPort(lpPerSocketContext, sdClient, adMySQL, SendToClient);
+		UpdateCompletionPort(lpPerSocketContext, sdClient, adMySQL, SendToClient);
 		if (lpPerSocketContext == nullptr) {					
-			throw std::exception("Error: ...");
+			break;
 		}
 
-		
+		lpPerSocketContext->m_dSessionId = m_dSessionId++;
 
-		recvBuffer(adMySQL, lpPerSocketContext->m_pIOContext, lpPerSocketContext->clientId);
+		RecvBuffer(adMySQL, lpPerSocketContext->m_pIOContext, lpPerSocketContext->m_dSessionId);
 
-		postContextToIOCP(lpPerSocketContext.get());
+		PostToIOCP(lpPerSocketContext.get());
 
 		lpPerSocketContext.reset();
 	} 
@@ -157,13 +178,13 @@ CIOCPClientServer::~CIOCPClientServer() {
 	//Отправляем на порт завершения данные нулевой длины чтобы функция GetQueuedCompletionStatus 
 	//получила эти данные и workerThread продолжит выполняться до блока где проверяется длина полученных данных и выйдет из цикла- завершит работу.
 	if (m_hIOCP) {
-		for (size_t i = 0; i < m_vWorkerThread.size(); i++) {
+		for (size_t i = 0; i < m_vWorkerPayloads.size(); i++) {
 			PostQueuedCompletionStatus(m_hIOCP, 0, 0, nullptr);
 		}
 	}
 
 	//Проверяем выполняются ли еще потоки, если нет то аттачим их к главному треду чтобы синхронно и безопасно удалить их.
-	for (auto it = m_vWorkerThread.begin(); it != m_vWorkerThread.end(); ++it) {
+	for (auto it = m_vWorkerPayloads.begin(); it != m_vWorkerPayloads.end(); ++it) {
 
 		if (it->get()->joinable() && WaitForSingleObject(it->get()->native_handle(), 500) == WAIT_OBJECT_0) {
 			it->get()->join();
@@ -175,10 +196,10 @@ CIOCPClientServer::~CIOCPClientServer() {
 		
 	}
 	//не используем итераторы для динамически изменяемого контейнера, иначе м.б. ошибка когда итератор == nullptr
-	for (size_t i = 0; i < m_vContexts.size(); i++) {
-		removeIOContext(m_vContexts[i]);
+	for (size_t i = 0; i < m_vConnectedClients.size(); i++) {
+		RemoveSession(m_vConnectedClients[i]);
 	}
-	m_vContexts.clear();
+	m_vConnectedClients.clear();
 
 	if (m_hIOCP) {
 		CloseHandle(m_hIOCP);
@@ -192,11 +213,11 @@ CIOCPClientServer::~CIOCPClientServer() {
 	}
 
 	WSACleanup();
-	SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CIOCPClientServer::сtrlHandler), false);
+	SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CIOCPClientServer::ConsoleEventHandler), false);
 }
 
 //Инициализируем сокет, который будет слушать порт к которому будут коннектиться клиенты.
-SOCKET CIOCPClientServer::createSocket(std::string port, bool isListenSocket) {
+SOCKET CIOCPClientServer::CreateSocket(const std::string port, const bool isListenSocket) {
 	SOCKET socket;
 
 	struct addrinfo hints = {0};
@@ -254,27 +275,25 @@ SOCKET CIOCPClientServer::createSocket(std::string port, bool isListenSocket) {
 	//	//std::cout << "setsockopt(SNDBUF) failed: " << WSAGetLastError() << std::endl;
 	//	return NULL;
 	//}
-	//деаллоцируем структуру addrlocal.
+
 	freeaddrinfo(addrlocal);
 
 	return socket;
 }
 
 //Рабочий поток обрабатывает все оперции чтения и записи в сокете связанным с портом завершения.
-int CIOCPClientServer::workerThread(LPVOID WorkThreadContext) {
+int CIOCPClientServer::WorkerThread(LPVOID WorkThreadContext) {
 
 	CIOCPClientServer* server = static_cast<CIOCPClientServer*>(WorkThreadContext);
 	HANDLE hIOCP = server->m_hIOCP;
 	bool bSuccess = false;
 	ClientContextPtr lpPerSocketContext = nullptr;
 	LPWSAOVERLAPPED lpOverlapped = nullptr;
-	//ClientContextPtr lpPerSocketContext;
+	
 	IOContextPtr lpIOContext;
 	DWORD dwIoSize = 0;
 	
 	while(true) {
-		//std::cout << "Client[" << std::this_thread::get_id() << "] GetQueuedCompletionStatus["<< std::this_thread::get_id() <<"] start" << std::endl;
-		
 		
         //присоединяем текущий поток к пулу потоков порта завершения, который был создан ранее ОС. Функция блокирует поток, если в очереди отсутствуют запросы.
 		bSuccess = GetQueuedCompletionStatus(hIOCP, &dwIoSize, reinterpret_cast<PDWORD_PTR>(&lpPerSocketContext), &lpOverlapped, INFINITE);
@@ -282,7 +301,7 @@ int CIOCPClientServer::workerThread(LPVOID WorkThreadContext) {
 		if (!bSuccess || (bSuccess && (dwIoSize == 0))) {
 
 			//соединение с клиентом разорвано
-			server->removeIOContext(lpPerSocketContext);
+			server->RemoveSession(lpPerSocketContext);
 			continue;
 		}
 
@@ -312,18 +331,21 @@ int CIOCPClientServer::workerThread(LPVOID WorkThreadContext) {
 		case WriteToClient:
 			//TODO не вызывать если нужно досылать данные
 			lpIOContext->IOOperation = AcceptClient;
-			if (!server->WSArecvBuffer(lpIOContext->m_dClientSocket, lpIOContext, lpPerSocketContext->clientId)) {
+			if (!server->RecvBufferAsync(lpIOContext->m_dClientSocket, lpIOContext, lpPerSocketContext->m_dSessionId)) {
 				std::cout << "Receive failed: " << WSAGetLastError() << std::endl;
-				server->removeIOContext(lpPerSocketContext);
+				server->RemoveSession(lpPerSocketContext);
 			}
 
 			break;
 		case AcceptClient:
 			lpIOContext->nTotalBytes = dwIoSize;
 			lpIOContext->IOOperation = ReadFromClient;
-			if (!server->sendBuffer(lpIOContext->m_dMySQLSocket, lpIOContext, lpPerSocketContext->clientId)) {
+
+			server->m_pLogger->Write(lpIOContext->buffer, lpIOContext->nTotalBytes);
+
+			if (!server->SendBuffer(lpIOContext->m_dMySQLSocket, lpIOContext, lpPerSocketContext->m_dSessionId)) {
 				std::cout << "MySQL[" << std::this_thread::get_id() << "]: Send failed: " << WSAGetLastError() << std::endl;;
-				server->removeIOContext(lpPerSocketContext);
+				server->RemoveSession(lpPerSocketContext);
 			}
 			
 			//ответ клиетну
@@ -331,21 +353,21 @@ int CIOCPClientServer::workerThread(LPVOID WorkThreadContext) {
 		case ReadFromClient:
 			lpIOContext->IOOperation = SendToClient;
 			//читаем ответ
-			if (!server->recvBuffer(lpIOContext->m_dMySQLSocket, lpIOContext, lpPerSocketContext->clientId)) {
+			if (!server->RecvBuffer(lpIOContext->m_dMySQLSocket, lpIOContext, lpPerSocketContext->m_dSessionId)) {
 				std::cout << "MySQL[" << std::this_thread::get_id() << "]: Receive failed: " << WSAGetLastError() << std::endl;
-				server->removeIOContext(lpPerSocketContext);
+				server->RemoveSession(lpPerSocketContext);
 			}
 
-			server->postContextToIOCP(lpPerSocketContext.get());
+			server->PostToIOCP(lpPerSocketContext.get());
 			break;
 		case SendToClient:
 			//ответ клиетну
 			if (lpIOContext->IOOperation != PartialBuffer) {
 				lpIOContext->IOOperation = WriteToClient;
 			}
-			if (!server->WSAsendBuffer(lpIOContext->m_dClientSocket, lpIOContext, lpPerSocketContext->clientId)) {
+			if (!server->SendBufferAsync(lpIOContext->m_dClientSocket, lpIOContext, lpPerSocketContext->m_dSessionId)) {
 				std::cout << "Send failed: " << WSAGetLastError() << std::endl;
-				server->removeIOContext(lpPerSocketContext);
+				server->RemoveSession(lpPerSocketContext);
 			}
 
 			break;
@@ -360,7 +382,7 @@ int CIOCPClientServer::workerThread(LPVOID WorkThreadContext) {
 
 
 
-bool CIOCPClientServer::recvBuffer(SOCKET recvSocket, IOContextPtr data, size_t id) {
+bool CIOCPClientServer::RecvBuffer(SOCKET recvSocket, IOContextPtr data, size_t id) {
 
 	DWORD dwFlags = 0;
 	DWORD dRecvTotalBytes = 0;
@@ -370,55 +392,54 @@ bool CIOCPClientServer::recvBuffer(SOCKET recvSocket, IOContextPtr data, size_t 
 	buffRecv->len = MAX_BUFF_SIZE;
 
 	while ((data->nTotalBytes = recv(recvSocket, buffRecv->buf, buffRecv->len, dwFlags)) == MAX_BUFF_SIZE) {
-		//напрямую пишем в сокет клиента большие данные - TODO: сделать через порт завершения.
-		/*for (int i = 0; i < MAX_BUFF_SIZE; i++) {
-			std::cout << data->buffer[i];
-		};*/
-		//buffRecv->buf = data->buffer;
-		std::cout << "\n=================================" << std::endl;
-		sendBuffer(data->m_dClientSocket, data, id);
-		//recvBuffer(data->m_dClientSocket, data, id);
+
+		m_pLogger->Write(data->buffer, data->nTotalBytes);
+
+		//напрямую пишем в сокет клиента большие данные
+		if (!SendBuffer(data->m_dClientSocket, data, id)) {
+			break;
+		}
+
+		buffRecv->buf = data->buffer;
 	}
 
-	return true;// ((data->nTotalBytes = recv(recvSocket, buffRecv->buf, buffRecv->len, dwFlags)) > 0);
+	return true;
 }
 
-bool CIOCPClientServer::sendBuffer(SOCKET sendSocket, IOContextPtr data, size_t id) {
+bool CIOCPClientServer::SendBuffer(SOCKET sendSocket, IOContextPtr data, size_t id) {
 
 	LPWSABUF buffSend = &data->wsabuf;
 	buffSend->buf = data->buffer;
 	buffSend->len = data->nTotalBytes;
 	DWORD dwFlags = 0;
-	send(sendSocket, buffSend->buf, buffSend->len, dwFlags);
+	//send(sendSocket, buffSend->buf, buffSend->len, dwFlags);
 
-	return true;// send(sendSocket, buffSend->buf, buffSend->len, dwFlags) != SOCKET_ERROR);
+	return (send(sendSocket, buffSend->buf, buffSend->len, dwFlags) != SOCKET_ERROR);
 
 }
 
-bool CIOCPClientServer::postContextToIOCP(CClientContext* lpPerSocketContext) {
+bool CIOCPClientServer::PostToIOCP(CClientContext* lpPerSocketContext) {
 
 	size_t size = sizeof(*lpPerSocketContext);
 	return PostQueuedCompletionStatus(m_hIOCP, size, (DWORD)(lpPerSocketContext), &(lpPerSocketContext->m_pIOContext->overlapped));
 
 }
 
-bool CIOCPClientServer::WSArecvBuffer(SOCKET recvSocket, IOContextPtr buffer, size_t id) {
+bool CIOCPClientServer::RecvBufferAsync(SOCKET recvSocket, IOContextPtr buffer, size_t id) {
 
-	addBufferInMap(buffer);
+	AddBufferInQueue(buffer);
 	
-	//std::cout << "Client[" << id << "] recvBuffer socket[" << recvSocket << "]" << std::endl;
-
 	LPWSAOVERLAPPED pOverlapped = &buffer->overlapped;
 	//ZeroMemory(pOverlapped, sizeof(WSAOVERLAPPED));
+
 	DWORD totalBytes = 0;
 	DWORD dwFlags = 0;
 	LPWSABUF buffRecv = &buffer->wsabuf;
-	//ставим указатель на началло буфера
 	buffRecv->buf = buffer->buffer;
 	buffRecv->len = MAX_BUFF_SIZE;
 	//std::fill(buffRecv->buf, buffRecv->buf + MAX_BUFF_SIZE, 0);
 
-	if(WSARecv(recvSocket, buffRecv, 1, &totalBytes, &dwFlags, pOverlapped, nullptr) == SOCKET_ERROR
+	if(WSARecv(buffer->m_dClientSocket, buffRecv, 1, &totalBytes, &dwFlags, pOverlapped, nullptr) == SOCKET_ERROR
 		&& (ERROR_IO_PENDING != WSAGetLastError())) {
 		std::cout << "WSArecvBuffer: error " << WSAGetLastError() << " in receive" << std::endl;
 		return false;
@@ -427,15 +448,14 @@ bool CIOCPClientServer::WSArecvBuffer(SOCKET recvSocket, IOContextPtr buffer, si
 	return true;
 }
 
-bool CIOCPClientServer::WSAsendBuffer(SOCKET sendSocket, IOContextPtr buffer, size_t id) {
+bool CIOCPClientServer::SendBufferAsync(SOCKET sendSocket, IOContextPtr buffer, size_t id) {
 	
-	IOContextPtr pBuffer = getNextBuffer(buffer);
+	IOContextPtr pBuffer = GetNextBuffer(buffer);
 
 	while (pBuffer) {
-		//нам нужно следить чтобы за раз только один тред мог вызывать WSASaend в сокет клиента сокет.
-		std::lock_guard<std::mutex> lock(buffer->m_mClientGuard);
+		//нам нужно следить чтобы за раз только один тред мог вызывать WSASaend для сессии.
+		std::lock_guard<std::mutex> lock(buffer->m_mClientSync);
 
-		//указатель на overlapped
 		LPWSAOVERLAPPED pOverlapped = &pBuffer->overlapped;
 
 		DWORD dwFlags = 0;
@@ -449,7 +469,7 @@ bool CIOCPClientServer::WSAsendBuffer(SOCKET sendSocket, IOContextPtr buffer, si
 			return false;
 		}
 
-		pBuffer = processNextBuffer(pBuffer);
+		pBuffer = ProcessNextBuffer(pBuffer);
 	}
 
 	
@@ -457,7 +477,7 @@ bool CIOCPClientServer::WSAsendBuffer(SOCKET sendSocket, IOContextPtr buffer, si
 }
 
 //Аллоцирует контекст для сокета для нового соединения и связывает сокет с портом завершения.
-void CIOCPClientServer::updateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation) {
+void CIOCPClientServer::UpdateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation) {
 
 	context.reset(new CClientContext(sdClient, sdMySQL, operation));
 	if (!context.get()) {
@@ -467,27 +487,27 @@ void CIOCPClientServer::updateCompletionPort(ClientContextPtr& context, SOCKET s
 	//свзыввем хендл сокета клиента с портом завершения, иными словами оповещаем порт завершения о том что хотим наблюдать за этим сокетом
 	m_hIOCP = CreateIoCompletionPort(reinterpret_cast<HANDLE>(sdClient), m_hIOCP, reinterpret_cast<DWORD_PTR>(context.get()), 0);
 	if(!m_hIOCP) {
-		//std::cout << "CreateIoCompletionPort() failed: " << GetLastError() << std::endl;
+		std::cout << "CreateIoCompletionPort() failed: " << GetLastError() << std::endl;
 		context.reset();
 		return;
 	}
 
-	context->clientId = clientID++;
+	context->m_dSessionId = m_dSessionId++;
 
-	addBufferInMap(context->m_pIOContext);
-	addIOContext(context);
+	AddBufferInQueue(context->m_pIOContext);
+	AddNewSession(context);
 }
 
-void CIOCPClientServer::addIOContext(ClientContextPtr lpPerSocketContext) {
+void CIOCPClientServer::AddNewSession(ClientContextPtr lpPerSocketContext) {
 
-	std::lock_guard<std::mutex> lock(m_mContextsGuard);
+	std::lock_guard<std::mutex> lock(m_mContextsSync);
 	
-	m_vContexts.push_back(std::move(lpPerSocketContext));
+	m_vConnectedClients.push_back(std::move(lpPerSocketContext));
 
 }
 
-IOContextPtr CIOCPClientServer::getNextBuffer(IOContextPtr buffer) {
-	std::lock_guard<std::mutex> lock(m_mContextsGuard);
+IOContextPtr CIOCPClientServer::GetNextBuffer(IOContextPtr buffer) {
+	std::lock_guard<std::mutex> lock(m_mContextsSync);
 	auto removedItemIt = std::find(m_vRemovedBufferNumbers.begin(), m_vRemovedBufferNumbers.end(), m_dOutgoingSequence);
 
 	if (removedItemIt != m_vRemovedBufferNumbers.end()) {
@@ -508,8 +528,8 @@ IOContextPtr CIOCPClientServer::getNextBuffer(IOContextPtr buffer) {
 	return nextPtr;
 }
 
-IOContextPtr CIOCPClientServer::processNextBuffer(IOContextPtr buffer) {
-	std::lock_guard<std::mutex> lock(m_mContextsGuard);
+IOContextPtr CIOCPClientServer::ProcessNextBuffer(IOContextPtr buffer) {
+	std::lock_guard<std::mutex> lock(m_mContextsSync);
 	InterlockedIncrement(&m_dOutgoingSequence);
 	IOContextPtr nextPtr = nullptr;
 	auto it = m_mBuffer.begin();
@@ -524,7 +544,7 @@ IOContextPtr CIOCPClientServer::processNextBuffer(IOContextPtr buffer) {
 	return nextPtr;
 }
 
-void CIOCPClientServer::removeBufferFromMap(IOContextPtr buffer) {
+void CIOCPClientServer::RemoveBufferFromQueue(IOContextPtr buffer) {
 
 	auto it = m_mBuffer.find(buffer->sequenceNumber);
 
@@ -539,9 +559,9 @@ void CIOCPClientServer::removeBufferFromMap(IOContextPtr buffer) {
 	}
 }
 
-void CIOCPClientServer::addBufferInMap(IOContextPtr& buffer) {
+void CIOCPClientServer::AddBufferInQueue(IOContextPtr& buffer) {
 
-	std::lock_guard<std::mutex> lock(m_mContextsGuard);
+	std::lock_guard<std::mutex> lock(m_mContextsSync);
 
 	InterlockedIncrement(&m_dIncomingSequence);
 
@@ -551,17 +571,17 @@ void CIOCPClientServer::addBufferInMap(IOContextPtr& buffer) {
 
 }
 
-void CIOCPClientServer::removeIOContext(ClientContextPtr lpPerSocketContext) {
+void CIOCPClientServer::RemoveSession(ClientContextPtr lpPerSocketContext) {
 
-	std::lock_guard<std::mutex> lock(m_mContextsGuard);
+	std::lock_guard<std::mutex> lock(m_mContextsSync);
 
-	auto it = std::find(m_vContexts.begin(), m_vContexts.end(), lpPerSocketContext);
+	auto it = std::find(m_vConnectedClients.begin(), m_vConnectedClients.end(), lpPerSocketContext);
 			
-	if (it != m_vContexts.end()) {
+	if (it != m_vConnectedClients.end()) {
 
-		removeBufferFromMap(it->get()->m_pIOContext);
+		RemoveBufferFromQueue(it->get()->m_pIOContext);
 		it->reset();
-		m_vContexts.erase(it);
+		m_vConnectedClients.erase(it);
 	}
 	
 }

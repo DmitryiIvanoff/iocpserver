@@ -117,13 +117,14 @@
     <ClCompile>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>EnableAllWarnings</WarningLevel>
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -155,6 +156,8 @@
     <ClCompile Include="CClientContext.cpp" />
     <ClCompile Include="CIOCPClientServer.Cpp" />
     <ClCompile Include="CIOCPMySQLServer.cpp" />
+    <ClCompile Include="CLogger.cpp" />
+    <ClCompile Include="CParser.cpp" />
     <ClCompile Include="IOCPProxyLoggingServer.cpp" />
     <ClCompile Include="iocpserver.cpp" />
   </ItemGroup>
@@ -162,6 +165,8 @@
     <ClInclude Include="CClientContext.h" />
     <ClInclude Include="CIOCPClientServer.h" />
     <ClInclude Include="CIOCPMySQLServer.h" />
+    <ClInclude Include="CLogger.h" />
+    <ClInclude Include="CParser.h" />
     <ClInclude Include="IOCPProxyLoggingServer.h" />
     <ClInclude Include="IServer.h" />
   </ItemGroup>

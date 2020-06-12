@@ -1,87 +1,88 @@
-#ifndef IOCPSERVER_H
-#define IOCPSERVER_H
-
+#pragma once
 #include <thread>
 #include <vector>
 #include <map>
 #include <memory>
 #include <winsock2.h>
 #include "IServer.h"
+#include "CLogger.h"
 
+//Класс, отвечающий за обслуживание клиентских подключений.
 class CIOCPClientServer : public IServer{
 public:
-	CIOCPClientServer(int threadCount, std::string listenPort, std::string mySQLIOCP = "3306");
+	CIOCPClientServer(int threadCount, const std::string listenPort, const std::string mySQLIOCP = "3306");
 
 	~CIOCPClientServer();
+	//В этом методе происходит обработка новых срединений от клиентов.
 
-	void start();
+	void Start();
 
-	void setMySQLIOCP(HANDLE iocp) { m_hMySQLIOCP = iocp; }
+	void SetHelperIOCP(HANDLE compPort) { m_hMySQLIOCP = compPort; }
 
-	HANDLE getIOCP() { return m_hIOCP; }
+	HANDLE GetIOCP() const { return m_hIOCP; }
 
 
 private:
+	void AddNewSession(ClientContextPtr lpPerSocketContext);
 
+	void RemoveSession(ClientContextPtr lpPerSocketContext);
 
-	SOCKET createSocket(std::string port, bool isListenSocket) override;
+	SOCKET CreateSocket(const std::string port, const bool isListenSocket);
 
-	static int workerThread(LPVOID WorkContext);
+	static int WorkerThread(LPVOID WorkContext);
 
-	void updateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation) override;
+	void UpdateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation);
 
-	void removeIOContext(ClientContextPtr lpPerSocketContext) override;
+	bool PostToIOCP(CClientContext* lpPerSocketContext);
 
-	void addIOContext(ClientContextPtr lpPerSocketContext) override;
+	bool RecvBufferAsync(SOCKET recvSocket, IOContextPtr buffer, size_t id);
+	bool SendBufferAsync(SOCKET recvSocket, IOContextPtr buffer, size_t id);
 
-	bool postContextToIOCP(CClientContext* lpPerSocketContext);
+	bool RecvBuffer(SOCKET recvSocket, IOContextPtr buffer, size_t id);
+	bool SendBuffer(SOCKET sendSocket, IOContextPtr buffer, size_t id);
 
-	bool WSArecvBuffer(SOCKET recvSocket, IOContextPtr buffer, size_t id);
-	bool WSAsendBuffer(SOCKET recvSocket, IOContextPtr buffer, size_t id);
+	IOContextPtr GetNextBuffer(IOContextPtr buffer);
 
-	bool recvBuffer(SOCKET recvSocket, IOContextPtr buffer, size_t id) override;
-	bool sendBuffer(SOCKET sendSocket, IOContextPtr buffer, size_t id) override;
+	void AddBufferInQueue(IOContextPtr& buffer);
 
-	IOContextPtr getNextBuffer(IOContextPtr buffer);
+	void RemoveBufferFromQueue(IOContextPtr buffer);
 
-	void addBufferInMap(IOContextPtr& buffer);
-
-	void removeBufferFromMap(IOContextPtr buffer);
-
-	IOContextPtr processNextBuffer(IOContextPtr buffer);
+	IOContextPtr ProcessNextBuffer(IOContextPtr buffer);
 	//обработчик событий консоли
-	static bool сtrlHandler(DWORD dwEvent);
-	
-	SOCKET m_dMySQLSocket;
+	static bool ConsoleEventHandler(DWORD dwEvent);
 
+private:
+
+	//сокет на который коннектится клиент
+	SOCKET m_dListenSocket;
+	SOCKET m_dMySQLSocket;
+	//количество потоков которое создаст класс
+	size_t m_dThreadCount;
+
+	size_t m_dIncomingSequence;
+	size_t m_dOutgoingSequence;
+	
 	//хендл порта завершения
 	HANDLE m_hIOCP;
 	//хендл порта завершения mySQL рутины
 	HANDLE m_hMySQLIOCP;
-
-	size_t m_dIncomingSequence;
-	size_t m_dOutgoingSequence;
+	
 	std::map<size_t, IOContextPtr> m_mBuffer;
 	std::vector<size_t> m_vRemovedBufferNumbers;
-
 	//контейнер для хранения данных, связанных с каждым вновь подключенным клиентом. Контекст хранится в контейнере в течении сессии.
-	std::vector<ClientContextPtr> m_vContexts;
+	std::vector<ClientContextPtr> m_vConnectedClients;
 	//контейнер для рабочих потоков
-	std::vector<std::shared_ptr<std::thread>> m_vWorkerThread;
+	std::vector<std::shared_ptr<std::thread>> m_vWorkerPayloads;
+
 	//мьютекс для безопасного добавления и удаления из контейнера
-	std::mutex m_mContextsGuard;
-	std::mutex m_mThreadGuard;
-	//количество потоков которое создаст класс
-	int m_dThreadCount;
+	std::mutex m_mContextsSync;
+	std::mutex m_mThreadSync;
+	
 	//указатель на себя, нужен для сtrlHandler
 	static CIOCPClientServer* currentServer;
-	//сокет на который коннектится клиент
-	SOCKET m_dListenSocket;
+	static size_t m_dSessionId;
 
-	ClientContextPtr mysqlPointer;
-
-	static int clientID;
+	LoggerPtr m_pLogger;
 };
 
 typedef std::shared_ptr<CIOCPClientServer> IOCPClientServerPtr;
-#endif

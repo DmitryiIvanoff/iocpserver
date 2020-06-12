@@ -12,28 +12,28 @@ public:
 
 	~CIOCPMySQLServer();
 
-	void setClientIOCP(HANDLE iocp) { clientIOCP = iocp; }
+	void SetHelperIOCP(HANDLE compPort) { clientIOCP = compPort; }
 
 	HANDLE getIOCP() { return m_hIOCP; }
 
 private:
 	static int workerThread(LPVOID WorkContext);
 
-	SOCKET createSocket(std::string port, bool isListenSocket) override;
+	SOCKET CreateSocket(std::string port, bool isListenSocket);// override;
 
-	void updateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation) override;
+	void UpdateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation);// override;
 
-	void removeIOContext(ClientContextPtr lpPerSocketContext) override;
+	void RemoveIOContext(ClientContextPtr lpPerSocketContext);// override;
 
-	void addIOContext(ClientContextPtr lpPerSocketContext) override;
+	void AddIOContext(ClientContextPtr lpPerSocketContext);// override;
 	bool postContextToIOCP(CClientContext* lpPerSocketContext);
 
 	//bool postContextToIOCP(ClientContextPtr lpPerSocketContext) override { return true; };
 
 	bool WSASendBuffer(SOCKET sendSocket, IOContextPtr data, size_t id);
 	bool WSArecvBuffer(SOCKET recvSocket, IOContextPtr data, size_t id);
-	bool recvBuffer(SOCKET recvSocket, IOContextPtr data, size_t id) override;
-	bool sendBuffer(SOCKET sendSocket, IOContextPtr data, size_t id) override;
+	bool RecvBuffer(SOCKET recvSocket, IOContextPtr data, size_t id);// override;
+	bool SendBuffer(SOCKET sendSocket, IOContextPtr data, size_t id);// override;
 
 private:
 	//обработчик событий консоли
@@ -49,7 +49,7 @@ private:
 	//контейнер для рабочих потоков
 	std::vector<std::shared_ptr<std::thread>> m_vWorkerThread;
 	//мьютекс для безопасного добавления и удаления из контейнера
-	std::mutex m_mContextsGuard;
+	std::mutex m_mContextsSync;
 	//количество потоков которое создаст класс
 	int m_dThreadCount;
 	//указатель на себя, нужен для сtrlHandler

@@ -21,5 +21,5 @@ CIOCPProxyLoggingServer::~CIOCPProxyLoggingServer() {
 }
 
 void CIOCPProxyLoggingServer::startClientRoutineInThread(CIOCPClientServer* routine) {
-	routine->start();
+	routine->Start();
 }
