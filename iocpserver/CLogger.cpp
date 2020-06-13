@@ -46,6 +46,12 @@ void CLogger::Write(IOContextPtr buffer) {
 	size_t length = buffer->nTotalBytes;
 	enIOOperation opCode = buffer->IOOperation;
 
+	//Парсим только SQL-запросы от клиента
+	if (opCode != ReadFromClient)
+	{
+		return;
+	}
+
 	std::string sLog(log, length);
 	m_pParser->Parse(sLog, opCode);
 	
