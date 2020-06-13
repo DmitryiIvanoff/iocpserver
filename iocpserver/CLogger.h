@@ -1,7 +1,9 @@
 #pragma once
-#include <memory>
 #include <fstream>
+#include <memory>
 #include <mutex>
+#include "CClientContext.h"
+
 
 class CParser;
 typedef std::shared_ptr<CParser> PrserPtr;
@@ -14,13 +16,12 @@ class CLogger
 public:
 	//инстанцирует логгер если он еще не создан.
 	static LoggerPtr GetLogger();
-	void Write(const char* log, const size_t length);
+	void Write(IOContextPtr buffer);
 	~CLogger();
 
 private:
 	CLogger();
 	const std::string GetCurrentDateTime();
-	size_t getMessageEndPosition(const char* log, const size_t length);
 
 private:
 	static std::string FILE_NAME;

@@ -10,7 +10,7 @@
 //Класс, отвечающий за обслуживание клиентских подключений.
 class CIOCPClientServer : public IServer{
 public:
-	CIOCPClientServer(int threadCount, const std::string listenPort, const std::string mySQLIOCP = "3306");
+	CIOCPClientServer(int threadCount, const std::string listenPort);
 
 	~CIOCPClientServer();
 	
@@ -37,9 +37,6 @@ private:
 
 	bool RecvBufferAsync(IOContextPtr buffer);
 	bool SendBufferAsync(IOContextPtr buffer);
-
-	bool RecvBuffer(SOCKET recvSocket, IOContextPtr buffer);
-	bool SendBuffer(SOCKET sendSocket, IOContextPtr buffer);
 
 	IOContextPtr GetNextBuffer();
 

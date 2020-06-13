@@ -3,7 +3,7 @@
 
 extern bool g_bEndServer;
 
-CIOCPProxyLoggingServer::CIOCPProxyLoggingServer(int numMySQLThreads, int numClientThreads, std::string mySQLPort, std::string listenPort) {
+CIOCPProxyLoggingServer::CIOCPProxyLoggingServer(int numMySQLThreads, int numClientThreads, const std::string mySQLPort, const std::string listenPort) {
 	mySQLServer = std::make_shared<CIOCPMySQLServer>(numMySQLThreads, mySQLPort);
 	clientServer = std::make_shared<CIOCPClientServer>(numClientThreads, listenPort);
 

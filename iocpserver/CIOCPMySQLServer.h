@@ -9,7 +9,7 @@
 class CIOCPMySQLServer : public IServer
 {
 public:
-	CIOCPMySQLServer(int threadCount, std::string mySQLPosrt);
+	CIOCPMySQLServer(int threadCount, const std::string mySQLPosrt);
 
 	~CIOCPMySQLServer();
 
@@ -18,40 +18,30 @@ public:
 	HANDLE GetIOCP() { return m_hIOCP; }
 
 private:
-	static int workerThread(LPVOID WorkContext);
+	static int WorkerThread(LPVOID WorkContext);
 
 	SOCKET CreateSocket(std::string port);
 
-	void UpdateCompletionPort(ClientContextPtr& context, SOCKET sdClient, SOCKET sdMySQL, etIOOperation operation);
-
 	bool PostToIOCP(CClientContext* lpPerSocketContext);
 
-	bool RecvBuffer(SOCKET recvSocket, IOContextPtr data);
-	bool SendBuffer(SOCKET sendSocket, IOContextPtr data);
+	bool RecvBuffer(SOCKET recvSocket, IOContextPtr buffer);
+	bool SendBuffer(SOCKET sendSocket, IOContextPtr buffer);
+	//обработчик событий консоли
+	static bool ConsoleEventHandler(DWORD dwEvent);
 
 private:
-	//обработчик событий консоли
-	static bool сtrlHandler(DWORD dwEvent);
-
 	//хендл порта завершения рутины, обслуживающей клиентов
 	HANDLE clientIOCP;
 	//хендл порта завершения
 	HANDLE m_hIOCP;
-
-	//контейнер для хранения контекстов, связанных с каждым подключенным клиентом.
-	std::vector<ClientContextPtr> m_vContexts;
 	//контейнер для рабочих потоков
-	std::vector<std::shared_ptr<std::thread>> m_vWorkerThread;
-	//мьютекс для безопасного добавления и удаления из контейнера
-	std::mutex m_mContextsSync;
+	std::vector<std::shared_ptr<std::thread>> m_vWorkerPayloads;
 	//количество потоков которое создаст класс
-	int m_dThreadCount;
+	size_t m_dThreadCount;
 	//указатель на себя, нужен для сtrlHandler
 	static CIOCPMySQLServer* currentServer;
-	
 
-	//для работы с mySQL:
-	SOCKET m_dMySQLSocket;
+	const std::string m_sMySQLPort;
 
 	LoggerPtr m_pLogger;
 };

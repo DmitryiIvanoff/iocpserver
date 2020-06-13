@@ -1,6 +1,7 @@
 #include <ctime>
 #include <string>
 #include <sstream>
+#include <iostream>
 #include <thread>
 #include "CLogger.h"
 #include "CParser.h"
@@ -10,7 +11,7 @@ LoggerPtr CLogger::m_pLogger = nullptr;
 
 CLogger::CLogger() {
 	m_pParser.reset(new CParser());
-	m_stream.open(CLogger::FILE_NAME, std::fstream::out | std::fstream::app | std::fstream::trunc);
+	m_stream.open(CLogger::FILE_NAME, std::fstream::out | std::fstream::app);
 }
 
 LoggerPtr CLogger::GetLogger()
@@ -25,21 +26,6 @@ CLogger::~CLogger() {
 	m_stream.close();
 }
 
-size_t CLogger::getMessageEndPosition(const char* log, const size_t length) {
-
-	char* oendOfMySQLMessage = const_cast<char*>(log + length);
-	size_t pos = length;
-
-	while (pos > 0) {
-
-		if (*oendOfMySQLMessage-- != MYSQL_EOF_MARKER) {
-			return pos;
-		}
-		pos--;
-	}
-
-	return 0;
-}
 const std::string CLogger::GetCurrentDateTime() {
 	time_t     now = time(0);
 	struct tm  tstruct;
@@ -52,22 +38,35 @@ const std::string CLogger::GetCurrentDateTime() {
 }
 
 
-void CLogger::Write(const char* log, const size_t length) {
+void CLogger::Write(IOContextPtr buffer) {
+
+	//пишем только клиентские запросы (по условию задания парсим и логируем SQL запросы)
+	etIOOperation opCode = buffer->IOOperation;
+	if (opCode != ReadFromClient) {
+		return;
+	}
 
 	std::lock_guard<std::mutex> lock(m_pLogger->m_mLogSync);
+	
 
-	int packetLength = PACKET_LEN(log);
-	char* packetMessage = PACKET_MSG(log);
-	char cmd = MYSQL_COMMAND(log);
+	const char* log = buffer->buffer;
+	size_t length = buffer->nTotalBytes;
+	
 
-	size_t messageLength = getMessageEndPosition(packetMessage, packetLength > length ? length : packetLength);
-
-	std::string outputString(packetMessage, messageLength);
+	std::string sLog(log, length);
+	m_pParser->Parse(sLog, opCode);
 	
 	std::stringstream ss;
 
-	ss << GetCurrentDateTime() << " [" << std::this_thread::get_id() << "] " + outputString + "\n";
+	ss << GetCurrentDateTime() << " [" << std::this_thread::get_id() << "] " << sLog << "\n";
 
-	m_pLogger->m_stream.write(ss.str().c_str(), ss.str().length());
+	if (m_pLogger->m_stream.is_open()) {
+		m_pLogger->m_stream << ss.rdbuf();
+	}
+	else
+	{
+		std::cout << "Error: file not opened" << std::endl;
+	}
+	
 	
 }

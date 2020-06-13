@@ -52,7 +52,7 @@ bool CIOCPClientServer::ConsoleEventHandler(DWORD dwEvent) {
 	return true;
 }
 
-CIOCPClientServer::CIOCPClientServer(int threadCount, const std::string port, const std::string mySQLPort) :
+CIOCPClientServer::CIOCPClientServer(int threadCount, const std::string port) :
 	m_dListenSocket(INVALID_SOCKET),
 	m_dMySQLSocket(INVALID_SOCKET),
 	m_dThreadCount(threadCount),
@@ -93,7 +93,7 @@ CIOCPClientServer::CIOCPClientServer(int threadCount, const std::string port, co
 		m_vWorkerPayloads.push_back(std::move(workThread));
 	}	
 
-	m_pLogger = CLogger::GetLogger();//TODO:после сделать 
+	m_pLogger = CLogger::GetLogger();
 
 	currentServer = this;
 }
@@ -113,11 +113,7 @@ void CIOCPClientServer::Start() {
 		sdClient = WSAAccept(m_dListenSocket, nullptr, nullptr, nullptr, 0);
 		if (sdClient == SOCKET_ERROR) {
 
-			//
-			// If user hits Ctrl+C or Ctrl+Brk or console window is closed, the control
-			// handler will close the g_sdListen socket. The above WSAAccept call will 
-			// fail and we thus break out the loop,
-			//
+			//Нажали Ctrl+C
 			std::cout << "WSAAccept() failed: " << WSAGetLastError() << std::endl;
 			break;
 		}
@@ -131,7 +127,7 @@ void CIOCPClientServer::Start() {
 		lpPerSocketContext->m_dSessionId = m_dSessionId++;
 
 		//подключился новый клиент - постим мессадж об этом в порт завершения вспомогательного класса обслуживающего соединения с БД
-
+		//(см. https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html)
 		PostToIOCP(lpPerSocketContext.get());
 
 		lpPerSocketContext.reset();
@@ -147,15 +143,14 @@ void CIOCPClientServer::Start() {
 CIOCPClientServer::~CIOCPClientServer() {
 	g_bEndServer = true;
 
-	//Отправляем на порт завершения данные нулевой длины чтобы функция GetQueuedCompletionStatus 
-	//получила эти данные и workerThread продолжит выполняться до блока где проверяется длина полученных данных и выйдет из цикла- завершит работу.
+	//Пушим в очередь порта завершения данные нулевой длины - сигналим рабочим потокам, что нужно завершить работу.
 	if (m_hIOCP) {
 		for (size_t i = 0; i < m_vWorkerPayloads.size(); i++) {
 			PostQueuedCompletionStatus(m_hIOCP, 0, 0, nullptr);
 		}
 	}
 
-	//Проверяем выполняются ли еще потоки, если нет то аттачим их к главному треду чтобы синхронно и безопасно удалить их.
+	//Аттачим рабочие птококи с уже завершенными в них рутинами чтобы синхронно и безопасно завершить их работу.
 	for (auto it = m_vWorkerPayloads.begin(); it != m_vWorkerPayloads.end(); ++it) {
 
 		if (it->get()->joinable() && WaitForSingleObject(it->get()->native_handle(), 500) == WAIT_OBJECT_0) {
@@ -167,6 +162,7 @@ CIOCPClientServer::~CIOCPClientServer() {
 		}
 		
 	}
+
 	//не используем итераторы для динамически изменяемого контейнера, иначе м.б. ошибка когда итератор == nullptr
 	for (size_t i = 0; i < m_vConnectedClients.size(); i++) {
 		RemoveSession(m_vConnectedClients[i]);
@@ -241,7 +237,7 @@ SOCKET CIOCPClientServer::CreateSocket(const std::string port, const bool isList
 		return NULL;
 	}
 
-	//устанавливаем размер буфера отправки (SO_SNDBUF) в 0 - данные для отправки ине будут беферризироваться. Параметр будет браться из опций самого сокета (SOL_SOCKET)
+	//устанавливаем размер буфера 0 (SO_SNDBUF).
 	//int nZero = 0;
 	//if(setsockopt(socket, SOL_SOCKET, SO_SNDBUF, (char *)&nZero, sizeof(nZero)) == SOCKET_ERROR ) {
 	//	//std::cout << "setsockopt(SNDBUF) failed: " << WSAGetLastError() << std::endl;
@@ -276,25 +272,12 @@ int CIOCPClientServer::WorkerThread(LPVOID WorkThreadContext) {
 			continue;
 		}
 
-		if (g_bEndServer) {
+		if (g_bEndServer || !lpPerSocketContext.get()) {
 			//выходим из цикла и заканчиваем синхронно работу - в деструкторе этот поток аттачится к главному.
 			break;
 		}
 
-		if(!lpPerSocketContext.get()) {
-
-			//
-			// CTRL-C handler used PostQueuedCompletionStatus to post an I/O packet with
-			// a nullptr CompletionKey (or if we get one for any reason).  It is time to exit.
-			//
-			break;
-		}
-
-        //
-		// determine what type of IO packet has completed by checking the CIOContext 
-		// associated with this socket.  This will determine what action to take.
-		//
-		//std::lock_guard<std::mutex> socket(server->m_mThreadGuard);
+		//std::lock_guard<std::mutex> socket(server->m_mThreadSync);
 		//TODO: заменить на функции
 		lpIOContext = lpPerSocketContext->m_pIOContext;
 
@@ -313,25 +296,11 @@ int CIOCPClientServer::WorkerThread(LPVOID WorkThreadContext) {
 			lpIOContext->nTotalBytes = dwIoSize;
 			lpIOContext->IOOperation = ReadFromClient;
 			server->AddBufferInQueue(lpIOContext);
+			server->m_pLogger->Write(lpIOContext);
 			server->PostToIOCP(lpPerSocketContext.get());
-			server->m_pLogger->Write(lpIOContext->buffer, lpIOContext->nTotalBytes);
-			/*
-			if (!server->SendBuffer(lpIOContext->m_dMySQLSocket, lpIOContext, lpPerSocketContext->m_dSessionId)) {
-				std::cout << "MySQL[" << std::this_thread::get_id() << "]: Send failed: " << WSAGetLastError() << std::endl;;
-				server->RemoveSession(lpPerSocketContext);
-			}
-			*/
-			//std::cout << "Incorrect sequence" << std::endl;
+			
 			break;
 		case ReadFromClient:
-			//lpIOContext->IOOperation = SendToClient;
-			////читаем ответ
-			//if (!server->RecvBuffer(lpIOContext->m_dMySQLSocket, lpIOContext, lpPerSocketContext->m_dSessionId)) {
-			//	std::cout << "MySQL[" << std::this_thread::get_id() << "]: Receive failed: " << WSAGetLastError() << std::endl;
-			//	server->RemoveSession(lpPerSocketContext);
-			//}
-
-			//server->PostToIOCP(lpPerSocketContext.get());
 			std::cout << "Incorrect sequence" << std::endl;
 			break;
 		case SendToClient:
@@ -350,43 +319,6 @@ int CIOCPClientServer::WorkerThread(LPVOID WorkThreadContext) {
 	}
 
 	return 0;
-}
-
-
-
-bool CIOCPClientServer::RecvBuffer(SOCKET recvSocket, IOContextPtr data) {
-
-	DWORD dwFlags = 0;
-	LPWSABUF buffRecv = &data->wsabuf;
-
-	buffRecv->buf = data->buffer;
-	buffRecv->len = MAX_BUFF_SIZE;
-
-	while ((data->nTotalBytes = recv(recvSocket, buffRecv->buf, buffRecv->len, dwFlags)) == MAX_BUFF_SIZE) {
-
-		m_pLogger->Write(data->buffer, data->nTotalBytes);
-
-		//напрямую пишем в сокет клиента большие данные
-		if (!SendBuffer(data->m_dClientSocket, data)) {
-			break;
-		}
-
-		buffRecv->buf = data->buffer;
-	}
-
-	return true;
-}
-
-bool CIOCPClientServer::SendBuffer(SOCKET sendSocket, IOContextPtr data) {
-
-	LPWSABUF buffSend = &data->wsabuf;
-	buffSend->buf = data->buffer;
-	buffSend->len = data->nTotalBytes;
-	DWORD dwFlags = 0;
-	//send(sendSocket, buffSend->buf, buffSend->len, dwFlags);
-
-	return (send(sendSocket, buffSend->buf, buffSend->len, dwFlags) != SOCKET_ERROR);
-
 }
 
 bool CIOCPClientServer::PostToIOCP(CClientContext* lpPerSocketContext) {
