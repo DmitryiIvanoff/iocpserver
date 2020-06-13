@@ -291,7 +291,7 @@ int CIOCPClientServer::WorkerThread(LPVOID WorkThreadContext) {
 
 			break;
 		case AcceptClient:
-			//Опреация асинхронного чтения клиентских данных завершена - шлем их ч/з рутину, обслуживающую соединения с БД 
+			//Получили пакет от клиента - шлем его ч/з рутину, обслуживающую соединения с БД 
 			lpIOContext->nTotalBytes = dwIoSize;
 			lpIOContext->IOOperation = ReadFromClient;
 			server->AddBufferInQueue(lpIOContext);
@@ -303,7 +303,7 @@ int CIOCPClientServer::WorkerThread(LPVOID WorkThreadContext) {
 			std::cout << "Incorrect sequence" << std::endl;
 			break;
 		case SendToClient:
-			//считали данные из БД ч/з рутину, обслуживающуюу БД, шлем данные клиенту.
+			//Ответ из БД получен ч/з рутину, обслуживающуюу БД, шлем его асинхронно клиенту.
 			lpIOContext->IOOperation = WriteToClient;
 			if (!server->SendBufferAsync(lpIOContext)) {
 				std::cout << "Send failed: " << WSAGetLastError() << std::endl;

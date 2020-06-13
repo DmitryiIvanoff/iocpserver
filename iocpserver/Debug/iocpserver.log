@@ -1,2 +1,9 @@
-﻿  CLogger.cpp
+﻿  CClientContext.cpp
+  CIOCPClientServer.Cpp
+  CIOCPMySQLServer.cpp
+  CLogger.cpp
+  CParser.cpp
+  IOCPProxyLoggingServer.cpp
+  iocpserver.cpp
+  Создание кода...
   iocpserver.vcxproj -> C:\Users\username\Desktop\MyProjects\TCP_proxy\IOCP_server\iocpserver\Debug\iocpserver.exe

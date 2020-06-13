@@ -190,10 +190,10 @@ int CIOCPMySQLServer::WorkerThread(LPVOID WorkThreadContext) {
 		}
 
 		lpIOContext = lpPerSocketContext->m_pIOContext;
-		if (!lpIOContext) {
-			//клиент дропнул соединение:
-			continue;
-		}
+		//if (!lpIOContext) {
+		//	//клиент дропнул соединение:
+		//	continue;
+		//}
 		
 		switch (lpIOContext->IOOperation) {
 		case WriteToClient:
