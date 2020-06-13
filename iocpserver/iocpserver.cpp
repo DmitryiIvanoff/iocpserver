@@ -1,11 +1,18 @@
-﻿#include "IOCPProxyLoggingServer.h"
+﻿#include <iostream>
+#include <string>
+#include "IOCPProxyLoggingServer.h"
 
+extern bool g_bEndServer = false;
 static std::string g_sClientPort = "4000";
 static std::string g_sMySQLPort = "3306";
-extern bool g_bEndServer = false;
+const int g_dDBThreadsCount = 16;
+const int g_dClientThreadsCount = 10;
+
+std::string g_sInstruction = "To end execution please press Ctrl + C";
 
 int main()
 {
-	std::shared_ptr<CIOCPProxyLoggingServer> server(new CIOCPProxyLoggingServer(16, 10, g_sMySQLPort, g_sClientPort));
+	std::cout << g_sInstruction;
+	std::shared_ptr<CIOCPProxyLoggingServer> server(new CIOCPProxyLoggingServer(g_dDBThreadsCount, g_dClientThreadsCount, g_sMySQLPort, g_sClientPort));
 	getchar();
 }

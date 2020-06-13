@@ -171,7 +171,7 @@ int CIOCPMySQLServer::WorkerThread(LPVOID WorkThreadContext) {
 	bool bSuccess = false;
 
 	LPWSAOVERLAPPED lpOverlapped = nullptr;
-	ClientContextPtr lpPerSocketContext;
+	ClientContextPtr lpPerSocketContext = nullptr;
 	IOContextPtr lpIOContext;
 	DWORD dwIoSize = 0;
 
@@ -238,6 +238,9 @@ int CIOCPMySQLServer::WorkerThread(LPVOID WorkThreadContext) {
 			std::cout << "Incorrect sequence" << std::endl;
 			break;
 		}
+
+		lpPerSocketContext = nullptr;
+		lpOverlapped = nullptr;
 	}
 	std::cout << "Thread ended" << std::endl;
 	return 0;

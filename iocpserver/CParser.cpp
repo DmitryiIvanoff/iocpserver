@@ -1,6 +1,6 @@
 #include "CParser.h"
 	
-bool CParser::Parse(std::string& message, etIOOperation opCode) {
+bool CParser::Parse(std::string& message, enIOOperation opCode) {
 
 	bool result = true;
 	switch (opCode) {
@@ -35,7 +35,7 @@ void CParser::ParseClientMessage(std::string& message) {
 	}
 
 	char* clientMsg = getPacketMessage(message);
-	int pcktLength = getPacketLength(message) - MYSQL_COMMAND_LEN;
+	size_t pcktLength = getPacketLength(message) - MYSQL_COMMAND_LEN;
 	char cmd = *clientMsg;
 
 	if (pcktLength > message.length()) {
@@ -52,13 +52,13 @@ void CParser::ParseServerMessage(std::string& message) {
 	}
 
 	char* clientMsg = getPacketMessage(message);
-	int pcktLength = getPacketLength(message) - MYSQL_COMMAND_LEN;
+	size_t pcktLength = getPacketLength(message) - MYSQL_COMMAND_LEN;
 	char cmd = *clientMsg;
 
 	if (pcktLength > message.length()) {
 		pcktLength = message.length();
 	}
-	if (message.length() > MYSQL_DB_NAME_LEN)
+	if (pcktLength > MYSQL_DB_NAME_LEN)
 	{
 		message = message.substr(MYSQL_PACKET_HEADER_LEN + MYSQL_COMMAND_LEN, MYSQL_DB_NAME_LEN - 1);
 	}

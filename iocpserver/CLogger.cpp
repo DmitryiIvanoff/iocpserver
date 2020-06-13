@@ -40,18 +40,11 @@ const std::string CLogger::GetCurrentDateTime() {
 
 void CLogger::Write(IOContextPtr buffer) {
 
-	//пишем только клиентские запросы (по условию задания парсим и логируем SQL запросы)
-	etIOOperation opCode = buffer->IOOperation;
-	if (opCode != ReadFromClient) {
-		return;
-	}
-
 	std::lock_guard<std::mutex> lock(m_pLogger->m_mLogSync);
 	
-
 	const char* log = buffer->buffer;
 	size_t length = buffer->nTotalBytes;
-	
+	enIOOperation opCode = buffer->IOOperation;
 
 	std::string sLog(log, length);
 	m_pParser->Parse(sLog, opCode);

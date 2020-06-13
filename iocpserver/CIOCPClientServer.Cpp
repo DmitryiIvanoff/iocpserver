@@ -265,16 +265,15 @@ int CIOCPClientServer::WorkerThread(LPVOID WorkThreadContext) {
 		
         //присоедин€ем текущий поток к пулу потоков порта завершени€, который был создан ранее ќ—. ‘ункци€ блокирует поток, если в очереди отсутствуют запросы.
 		bSuccess = GetQueuedCompletionStatus(hIOCP, &dwIoSize, reinterpret_cast<PDWORD_PTR>(&lpPerSocketContext), &lpOverlapped, INFINITE);
-		
+		if (g_bEndServer || !lpPerSocketContext.get() || !lpPerSocketContext->m_pIOContext.get()) {
+			//выходим из цикла и заканчиваем синхронно работу - в деструкторе этот поток аттачитс€ к главному.
+			break;
+		}
+
 		if (!bSuccess || (bSuccess && (dwIoSize == 0))) {
 			//соединение с клиентом разорвано
 			server->RemoveSession(lpPerSocketContext);
 			continue;
-		}
-
-		if (g_bEndServer || !lpPerSocketContext.get()) {
-			//выходим из цикла и заканчиваем синхронно работу - в деструкторе этот поток аттачитс€ к главному.
-			break;
 		}
 
 		//std::lock_guard<std::mutex> socket(server->m_mThreadSync);
