@@ -7,10 +7,21 @@
 #include "IRoutine.h"
 #include "CLogger.h"
 
+class CClientRoutine;
+typedef std::shared_ptr<CClientRoutine> ClientRoutinePtr;
+
 //Класс, отвечающий за обслуживание клиентских подключений.
 class CClientRoutine : public IRoutine {
 public:
-	CClientRoutine(int threadCount, const std::string listenPort);
+	
+	static ClientRoutinePtr GetInstance(const int threadCount, const std::string listenPort) {
+		if (!currentRoutine) {
+			//Значение currentRoutine присвоится в конструкторе, я зимплементил такое поведение 
+			//т.к. в конструкторе стартуют рабочие потоки в которых нужен уже инициализированный умный указатель currentRoutine
+			new CClientRoutine(threadCount, listenPort);
+		}
+		return currentRoutine;
+	}
 
 	~CClientRoutine();
 	
@@ -24,6 +35,9 @@ public:
 
 
 private:
+
+	CClientRoutine(const int threadCount, const std::string listenPort);
+
 	void AddNewSession(BufferPtr buffer);
 
 	void RemoveSession(BufferPtr buffer);
@@ -77,12 +91,10 @@ private:
 	std::vector<std::shared_ptr<std::thread>> m_vWorkerPayloads;
 
 	std::mutex m_mBufferSync;
-	
-	//указатель на себя, нужен для обработчика событий консоли
-	static CClientRoutine* currentRoutine;
+
+	static ClientRoutinePtr currentRoutine;
+
 	static size_t m_dSessionId;
 
 	LoggerPtr m_pLogger;
 };
-
-typedef std::shared_ptr<CClientRoutine> ClientRoutinePtr;

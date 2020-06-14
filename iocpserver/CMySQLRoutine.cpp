@@ -5,7 +5,7 @@
 
 
 extern bool g_bEndServer;// установится в true в обработчиках событий консоли в рабочих рутинах
-CMySQLRoutine* CMySQLRoutine::currentRoutine = nullptr;
+MySQLRoutinePtr CMySQLRoutine::currentRoutine = nullptr;
 
 static std::mutex printMutex;
 
@@ -62,7 +62,7 @@ CMySQLRoutine::CMySQLRoutine(const int threadCount,const std::string mySQLPort) 
 		return;
 	}
 
-	currentRoutine = this;
+	currentRoutine.reset(this);
 
 	std::shared_ptr<std::thread> workThread;
 	for (size_t i = 0; i < m_dThreadCount; i++) {
@@ -106,6 +106,8 @@ CMySQLRoutine::~CMySQLRoutine() {
 
 	WSACleanup();
 	SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CMySQLRoutine::ConsoleEventHandler), false);
+
+	currentRoutine.reset();
 }
 
 //Инициализируем сокет, который будет слушать порт к которому будут коннектиться клиенты.

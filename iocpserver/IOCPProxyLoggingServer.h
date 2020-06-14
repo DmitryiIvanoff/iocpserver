@@ -12,6 +12,7 @@ public:
 	static void startClientRoutineInThread(CClientRoutine* routine);
 
 private:
+	//NOTE: классы CMySQLRoutine и CClientRoutine синглтоны.
 	ClientRoutinePtr clientRoutine;
 	MySQLRoutinePtr mySQLRoutine;
 	std::thread threadClientRoutine;

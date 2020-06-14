@@ -6,7 +6,9 @@
 #pragma warning( disable : 4996)
 
 extern bool g_bEndServer;
-CClientRoutine* CClientRoutine::currentRoutine = nullptr;
+
+ClientRoutinePtr CClientRoutine::currentRoutine = nullptr;
+
 size_t CClientRoutine::m_dSessionId = 0;
 
 bool CClientRoutine::ConsoleEventHandler(DWORD dwEvent) {
@@ -74,7 +76,7 @@ CClientRoutine::CClientRoutine(int threadCount, const std::string port) :
 		return;
 	}
 
-	currentRoutine = this;
+	currentRoutine.reset(this);
 
 	std::shared_ptr<std::thread> workThread;
 	for (size_t i = 0; i < m_dThreadCount; i++) {
@@ -169,6 +171,8 @@ CClientRoutine::~CClientRoutine() {
 
 	WSACleanup();
 	SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CClientRoutine::ConsoleEventHandler), false);
+
+	currentRoutine.reset();
 }
 
 //Инициализируем сокет, который будет слушать порт к которому будут коннектиться клиенты.

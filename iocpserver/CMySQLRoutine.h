@@ -6,10 +6,19 @@
 #include "IRoutine.h"
 #include "CLogger.h"
 
+class CMySQLRoutine;
+typedef std::shared_ptr<CMySQLRoutine> MySQLRoutinePtr;
+
 class CMySQLRoutine : public IRoutine {
 public:
-	CMySQLRoutine(const int threadCount, const std::string mySQLPosrt);
-
+	static MySQLRoutinePtr GetInstance(const int threadCount, const std::string listenPort) {
+		if (!currentRoutine) {
+			//Значение currentRoutine присвоится в конструкторе, я зимплементил такое поведение 
+			//т.к. в конструкторе стартуют рабочие потоки в которых нужен уже инициализированный умный указатель currentRoutine
+			new CMySQLRoutine(threadCount, listenPort);
+		}
+		return currentRoutine;
+	}
 	~CMySQLRoutine();
 
 	void SetHelperIOCP(const HANDLE compPort) override { clientIOCP = compPort; }
@@ -17,6 +26,8 @@ public:
 	HANDLE GetIOCP() const override { return m_hIOCP; }
 
 private:
+	CMySQLRoutine(const int threadCount, const std::string mySQLPosrt);
+
 	//хендлит все операции с портом завершения
 	static int WorkerThread();
 
@@ -42,11 +53,9 @@ private:
 	//количество потоков которое создаст класс
 	size_t m_dThreadCount;
 	//указатель на себя, нужен для обработчика событий консоли и WorkerThread
-	static CMySQLRoutine* currentRoutine;
+	static MySQLRoutinePtr currentRoutine;
 
 	const std::string m_sMySQLPort;
 
 	LoggerPtr m_pLogger;
 };
-
-typedef std::shared_ptr<CMySQLRoutine> MySQLRoutinePtr;
