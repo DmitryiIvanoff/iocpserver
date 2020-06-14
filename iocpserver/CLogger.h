@@ -16,7 +16,7 @@ class CLogger
 public:
 	//инстанцирует логгер если он еще не создан.
 	static LoggerPtr GetLogger();
-	void Write(IOContextPtr buffer);
+	void Write(BufferPtr buffer);
 	~CLogger();
 
 private:

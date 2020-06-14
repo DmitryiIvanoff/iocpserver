@@ -154,8 +154,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="CClientContext.cpp" />
-    <ClCompile Include="CIOCPClientServer.Cpp" />
-    <ClCompile Include="CIOCPMySQLServer.cpp" />
+    <ClCompile Include="CClientRoutine.Cpp" />
+    <ClCompile Include="CMySQLRoutine.cpp" />
     <ClCompile Include="CLogger.cpp" />
     <ClCompile Include="CParser.cpp" />
     <ClCompile Include="IOCPProxyLoggingServer.cpp" />
@@ -163,12 +163,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CClientContext.h" />
-    <ClInclude Include="CIOCPClientServer.h" />
-    <ClInclude Include="CIOCPMySQLServer.h" />
+    <ClInclude Include="CClientRoutine.h" />
+    <ClInclude Include="CMySQLRoutine.h" />
     <ClInclude Include="CLogger.h" />
     <ClInclude Include="CParser.h" />
     <ClInclude Include="IOCPProxyLoggingServer.h" />
-    <ClInclude Include="IServer.h" />
+    <ClInclude Include="IRoutine.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -2,7 +2,7 @@
 
 CClientContext::CClientContext(SOCKET clientSocket) {
 
-	m_pIOContext.reset(new CIOContext(clientSocket));
+	m_pIOContext.reset(new CBuffer(clientSocket));
 }
 
 

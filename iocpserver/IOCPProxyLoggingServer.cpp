@@ -3,23 +3,23 @@
 
 extern bool g_bEndServer;
 
-CIOCPProxyLoggingServer::CIOCPProxyLoggingServer(int numMySQLThreads, int numClientThreads, const std::string mySQLPort, const std::string listenPort) {
-	mySQLServer = std::make_shared<CIOCPMySQLServer>(numMySQLThreads, mySQLPort);
-	clientServer = std::make_shared<CIOCPClientServer>(numClientThreads, listenPort);
+CIOCPProxyLoggingServer::CIOCPProxyLoggingServer(const int numMySQLThreads, const int numClientThreads, const std::string mySQLPort, const std::string listenPort) {
+	mySQLRoutine = std::make_shared<CMySQLRoutine>(numMySQLThreads, mySQLPort);
+	clientRoutine = std::make_shared<CClientRoutine>(numClientThreads, listenPort);
 
-	clientServer->SetHelperIOCP(mySQLServer->GetIOCP());
-	mySQLServer->SetHelperIOCP(clientServer->GetIOCP());
+	clientRoutine->SetHelperIOCP(mySQLRoutine->GetIOCP());
+	mySQLRoutine->SetHelperIOCP(clientRoutine->GetIOCP());
 
-	threadClientServer = std::thread(&CIOCPProxyLoggingServer::startClientRoutineInThread, clientServer.get());		
+	threadClientRoutine = std::thread(&CIOCPProxyLoggingServer::startClientRoutineInThread, clientRoutine.get());		
 }
 
 CIOCPProxyLoggingServer::~CIOCPProxyLoggingServer() {
 	g_bEndServer = true;
-	if (threadClientServer.joinable()) {
-		threadClientServer.join();
+	if (threadClientRoutine.joinable()) {
+		threadClientRoutine.join();
 	}
 }
 
-void CIOCPProxyLoggingServer::startClientRoutineInThread(CIOCPClientServer* routine) {
+void CIOCPProxyLoggingServer::startClientRoutineInThread(CClientRoutine* routine) {
 	routine->Start();
 }

@@ -1,18 +1,18 @@
 #pragma once
-#include "CIOCPClientServer.h"
-#include "CIOCPMySQLServer.h"
+#include "CClientRoutine.h"
+#include "CMySQLRoutine.h"
 
 
 class CIOCPProxyLoggingServer {
 public:
-	CIOCPProxyLoggingServer(int numMySQLThreads, int numClientThreads, std::string mySQLPort, std::string listenPort);
+	CIOCPProxyLoggingServer(const int numMySQLThreads, const int numClientThreads, std::string mySQLPort, std::string listenPort);
 
 	~CIOCPProxyLoggingServer();
 
-	static void startClientRoutineInThread(CIOCPClientServer* routine);
+	static void startClientRoutineInThread(CClientRoutine* routine);
 
 private:
-	IOCPClientServerPtr clientServer;
-	IOCPMySQLServerPtr mySQLServer;
-	std::thread threadClientServer;
+	ClientRoutinePtr clientRoutine;
+	MySQLRoutinePtr mySQLRoutine;
+	std::thread threadClientRoutine;
 };

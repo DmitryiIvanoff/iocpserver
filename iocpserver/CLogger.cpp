@@ -38,7 +38,7 @@ const std::string CLogger::GetCurrentDateTime() {
 }
 
 
-void CLogger::Write(IOContextPtr buffer) {
+void CLogger::Write(BufferPtr buffer) {
 
 	std::lock_guard<std::mutex> lock(m_pLogger->m_mLogSync);
 	
@@ -57,7 +57,7 @@ void CLogger::Write(IOContextPtr buffer) {
 	
 	std::stringstream ss;
 
-	ss << GetCurrentDateTime() << " [" << std::this_thread::get_id() << "] " << sLog << "\n";
+	ss << GetCurrentDateTime() << " [" << std::this_thread::get_id() << ":" << buffer->m_dSessionId << "]" << sLog << "\n";
 
 	if (m_pLogger->m_stream.is_open()) {
 		m_pLogger->m_stream << ss.rdbuf();
