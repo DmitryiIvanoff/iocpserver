@@ -36,7 +36,7 @@ bool CMySQLRoutine::ConsoleEventHandler(DWORD dwEvent) {
 	return true;
 }
 
-CMySQLRoutine::CMySQLRoutine(int threadCount,const std::string mySQLPort) :
+CMySQLRoutine::CMySQLRoutine(const int threadCount,const std::string mySQLPort) :
 	clientIOCP(INVALID_HANDLE_VALUE),
 	m_hIOCP(INVALID_HANDLE_VALUE),
 	m_dThreadCount(threadCount),
@@ -179,7 +179,7 @@ int CMySQLRoutine::WorkerThread() {
 		}
 
 		if (!bSuccess || (bSuccess && (dwIoSize == 0))) {
-			//server->removeIOContext(lpPerSocketContext);
+			//server->RemoveSession(buffer);
 			continue;
 		}
 		
@@ -212,7 +212,7 @@ void CMySQLRoutine::OnClientAccepted(BufferPtr buffer) {
 	if (!buffer->m_dMySQLSocket)
 	{
 		std::cout << "Error..." << std::endl;
-		//server->RemoveSession(lpPerSocketContext);
+		//server->RemoveSession(buffer);
 		return;
 	}
 	RecvBuffer(buffer->m_dMySQLSocket, buffer);
@@ -224,13 +224,13 @@ void CMySQLRoutine::OnClientDataReceived(BufferPtr buffer) {
 
 	if (!SendBuffer(buffer->m_dMySQLSocket, buffer)) {
 		std::cout << "MySQL[" << std::this_thread::get_id() << "]: Send failed: " << WSAGetLastError() << std::endl;;
-		//server->RemoveSession(lpPerSocketContext);
+		//server->RemoveSession(buffer);
 		return;
 	}
 
 	if (!RecvBuffer(buffer->m_dMySQLSocket, buffer)) {
 		std::cout << "MySQL[" << std::this_thread::get_id() << "]: Receive failed: " << WSAGetLastError() << std::endl;
-		//server->RemoveSession(lpPerSocketContext);
+		//server->RemoveSession(buffer);
 		return;
 	}
 

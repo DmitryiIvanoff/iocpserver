@@ -1,5 +1,3 @@
-#pragma warning (disable:4127)
-
 #include <Ws2tcpip.h>
 #include <iostream>
 #include <chrono>
@@ -93,7 +91,7 @@ void CClientRoutine::Start() {
 
 	SOCKET sdClient = INVALID_SOCKET;
 	
-	BufferPtr lpPerSocketContext = nullptr;
+	BufferPtr buffer = nullptr;
 
 	g_bEndServer = false;
 
@@ -110,16 +108,16 @@ void CClientRoutine::Start() {
 		}
 
 		//св€зываем сокет клиента с портом завершени€ , аллоцируем структуру и добавл€ем ее в контейнер
-		UpdateCompletionPort(lpPerSocketContext, sdClient);
-		if (lpPerSocketContext == nullptr) {					
+		UpdateCompletionPort(buffer, sdClient);
+		if (buffer == nullptr) {					
 			break;
 		}
 
 		//подключилс€ новый клиент - постим мессадж об этом в порт завершени€ вспомогательного класса обслуживающего соединени€ с Ѕƒ
 		//(см. https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html)
-		PostToIOCP(lpPerSocketContext.get());
+		PostToIOCP(buffer.get());
 
-		lpPerSocketContext.reset();
+		buffer.reset();
 	} 
 	
 	
@@ -400,11 +398,11 @@ void CClientRoutine::UpdateCompletionPort(BufferPtr& buffer, SOCKET sdClient) {
 	AddNewSession(buffer);
 }
 
-void CClientRoutine::AddNewSession(BufferPtr lpPerSocketContext) {
+void CClientRoutine::AddNewSession(BufferPtr buffer) {
 
 	std::lock_guard<std::mutex> lock(m_mBufferSync);
 	
-	m_vConnectedClients.push_back(std::move(lpPerSocketContext));
+	m_vConnectedClients.push_back(std::move(buffer));
 
 }
 
@@ -473,11 +471,11 @@ void CClientRoutine::AddBufferInQueue(BufferPtr& buffer) {
 
 }
 
-void CClientRoutine::RemoveSession(BufferPtr lpPerSocketContext) {
+void CClientRoutine::RemoveSession(BufferPtr buffer) {
 
 	std::lock_guard<std::mutex> lock(m_mBufferSync);
 
-	auto it = std::find(m_vConnectedClients.begin(), m_vConnectedClients.end(), lpPerSocketContext);
+	auto it = std::find(m_vConnectedClients.begin(), m_vConnectedClients.end(), buffer);
 			
 	if (it != m_vConnectedClients.end()) {
 

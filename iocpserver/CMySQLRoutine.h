@@ -8,13 +8,13 @@
 
 class CMySQLRoutine : public IRoutine {
 public:
-	CMySQLRoutine(int threadCount, const std::string mySQLPosrt);
+	CMySQLRoutine(const int threadCount, const std::string mySQLPosrt);
 
 	~CMySQLRoutine();
 
-	void SetHelperIOCP(const HANDLE compPort) { clientIOCP = compPort; }
+	void SetHelperIOCP(const HANDLE compPort) override { clientIOCP = compPort; }
 
-	HANDLE GetIOCP() { return m_hIOCP; }
+	HANDLE GetIOCP() const override { return m_hIOCP; }
 
 private:
 	//хендлит все операции с портом завершения
@@ -22,7 +22,7 @@ private:
 
 	SOCKET CreateSocket(std::string port);
 
-	bool PostToIOCP(CBuffer* lpPerSocketContext);
+	bool PostToIOCP(CBuffer* buffer);
 
 	bool RecvBuffer(SOCKET recvSocket, BufferPtr buffer);
 	bool SendBuffer(SOCKET sendSocket, BufferPtr buffer);

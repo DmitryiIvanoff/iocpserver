@@ -18,23 +18,23 @@ public:
 	//в течении сессии буфер шарится между подпрограммами-рутинами.
 	void Start();
 
-	void SetHelperIOCP(const HANDLE compPort) { m_hMySQLIOCP = compPort; }
+	void SetHelperIOCP(const HANDLE compPort) override { m_hMySQLIOCP = compPort; }
 
-	HANDLE GetIOCP() const { return m_hIOCP; }
+	HANDLE GetIOCP() const override { return m_hIOCP; }
 
 
 private:
-	void AddNewSession(BufferPtr lpPerSocketContext);
+	void AddNewSession(BufferPtr buffer);
 
-	void RemoveSession(BufferPtr lpPerSocketContext);
+	void RemoveSession(BufferPtr buffer);
 
 	SOCKET CreateSocket(const std::string port, const bool isListenSocket);
 
 	static int WorkerThread();
 
-	void UpdateCompletionPort(BufferPtr& context, SOCKET sdClient);
+	void UpdateCompletionPort(BufferPtr& buffer, SOCKET sdClient);
 
-	bool PostToIOCP(CBuffer* lpPerSocketContext);
+	bool PostToIOCP(CBuffer* buffer);
 
 	bool RecvBufferAsync(BufferPtr buffer);
 	bool SendBufferAsync(BufferPtr buffer);

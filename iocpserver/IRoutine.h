@@ -4,8 +4,8 @@ class IRoutine {
 public:
 	virtual ~IRoutine() {};
 
-	HANDLE GetIOCP() const;
+	virtual HANDLE GetIOCP() const = 0;
 
-	void SetHelperIOCP(const HANDLE compPort);
+	virtual void SetHelperIOCP(const HANDLE compPort) = 0;
 
 };
