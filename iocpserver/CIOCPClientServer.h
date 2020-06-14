@@ -52,10 +52,9 @@ private:
 
 	//сокет на который коннектится клиент
 	SOCKET m_dListenSocket;
-	SOCKET m_dMySQLSocket;
 	//количество потоков которое создаст класс
 	size_t m_dThreadCount;
-
+	//переменные, нужные для организации очереди
 	size_t m_dIncomingSequence;
 	size_t m_dOutgoingSequence;
 	
@@ -66,7 +65,8 @@ private:
 	
 	std::map<size_t, IOContextPtr> m_mBuffer;
 	std::vector<size_t> m_vRemovedBufferNumbers;
-	//контейнер для хранения данных, связанных с каждым вновь подключенным клиентом. Контекст хранится в контейнере в течении сессии.
+	//контейнер для хранения данных, связанных с каждым вновь подключенным клиентом. Контекст хранится в контейнере в течении сессии,
+	//данные шарятся между своими потоками и потоками вспомогательной рутины, работающей mysql БД.
 	std::vector<ClientContextPtr> m_vConnectedClients;
 	//контейнер для рабочих потоков
 	std::vector<std::shared_ptr<std::thread>> m_vWorkerPayloads;
@@ -75,7 +75,7 @@ private:
 	std::mutex m_mContextsSync;
 	std::mutex m_mThreadSync;
 	
-	//указатель на себя, нужен для сtrlHandler
+	//указатель на себя, нужен для обработчика событий консоли
 	static CIOCPClientServer* currentServer;
 	static size_t m_dSessionId;
 

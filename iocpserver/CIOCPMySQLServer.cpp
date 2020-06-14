@@ -190,15 +190,8 @@ int CIOCPMySQLServer::WorkerThread(LPVOID WorkThreadContext) {
 		}
 
 		lpIOContext = lpPerSocketContext->m_pIOContext;
-		//if (!lpIOContext) {
-		//	//клиент дропнул соединение:
-		//	continue;
-		//}
 		
 		switch (lpIOContext->IOOperation) {
-		case WriteToClient:
-			std::cout << "Incorrect sequence" << std::endl;
-			break;
 		case AcceptClient:
 			//клиент подключилс€ -  коннектимс€ к Ѕƒ, читаем запрос и шлем ответ клиенту ч/з клиентскую рутину.
 			lpIOContext->m_dMySQLSocket = server->CreateSocket(server->m_sMySQLPort);
@@ -234,12 +227,12 @@ int CIOCPMySQLServer::WorkerThread(LPVOID WorkThreadContext) {
 
 			server->PostToIOCP(lpPerSocketContext.get());
 			break;
-		case SendToClient:
+		default:
 			std::cout << "Incorrect sequence" << std::endl;
 			break;
 		}
 
-		lpPerSocketContext = nullptr;
+		lpPerSocketContext.reset();
 		lpOverlapped = nullptr;
 	}
 	std::cout << "Thread ended" << std::endl;

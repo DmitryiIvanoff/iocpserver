@@ -2,14 +2,16 @@
 #include <string>
 #include "CClientContext.h"
 
+struct mysqlPacketInfo;
+
 class CParser
 {
 public:
-	bool Parse(std::string& message, enIOOperation opCode);
+	bool Parse(std::string& message);
 
 private:
-	void ParseClientQuery(std::string& message);
+	void ParseClientQuery(std::string& message, const mysqlPacketInfo packetInfo);
 	
-	void ParseClientCredentials(std::string& message);
+	void ParseClientCredentials(std::string& message, const mysqlPacketInfo packetInfo);
 };
 

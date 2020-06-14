@@ -53,7 +53,7 @@ void CLogger::Write(IOContextPtr buffer) {
 	}
 
 	std::string sLog(log, length);
-	m_pParser->Parse(sLog, opCode);
+	m_pParser->Parse(sLog);
 	
 	std::stringstream ss;
 

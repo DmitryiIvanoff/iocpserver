@@ -54,7 +54,6 @@ bool CIOCPClientServer::ConsoleEventHandler(DWORD dwEvent) {
 
 CIOCPClientServer::CIOCPClientServer(int threadCount, const std::string port) :
 	m_dListenSocket(INVALID_SOCKET),
-	m_dMySQLSocket(INVALID_SOCKET),
 	m_dThreadCount(threadCount),
 	m_dIncomingSequence(0),
 	m_dOutgoingSequence(1),
@@ -311,9 +310,11 @@ int CIOCPClientServer::WorkerThread(LPVOID WorkThreadContext) {
 			}
 
 			break;
+		default:
+			std::cout << "Incorrect sequence." << std::endl;
 		}
 
-		lpPerSocketContext = nullptr;
+		lpPerSocketContext.reset();
 		lpOverlapped = nullptr;
 	}
 
@@ -330,14 +331,12 @@ bool CIOCPClientServer::PostToIOCP(CClientContext* lpPerSocketContext) {
 bool CIOCPClientServer::RecvBufferAsync(IOContextPtr buffer) {
 
 	LPWSAOVERLAPPED pOverlapped = &buffer->overlapped;
-	//ZeroMemory(pOverlapped, sizeof(WSAOVERLAPPED));
-
 	DWORD totalBytes = 0;
 	DWORD dwFlags = 0;
+
 	LPWSABUF buffRecv = &buffer->wsabuf;
 	buffRecv->buf = buffer->buffer;
 	buffRecv->len = MAX_BUFF_SIZE;
-	//std::fill(buffRecv->buf, buffRecv->buf + MAX_BUFF_SIZE, 0);
 
 	if(WSARecv(buffer->m_dClientSocket, buffRecv, 1, &totalBytes, &dwFlags, pOverlapped, nullptr) == SOCKET_ERROR
 		&& (ERROR_IO_PENDING != WSAGetLastError())) {
@@ -353,7 +352,7 @@ bool CIOCPClientServer::SendBufferAsync(IOContextPtr buffer) {
 	IOContextPtr pBuffer = GetNextBuffer();
 
 	while (pBuffer) {
-		//нам нужно следить чтобы за раз только один тред мог вызывать WSASaend для сессии.
+		//нам нужно следить чтобы за раз только один тред мог вызывать WSASaend для сокета клиента.
 		std::lock_guard<std::mutex> lock(buffer->m_mClientSync);
 
 		LPWSAOVERLAPPED pOverlapped = &pBuffer->overlapped;
