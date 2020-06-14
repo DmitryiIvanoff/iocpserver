@@ -2,7 +2,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
-#include "CClientContext.h"
+#include "CBuffer.h"
 
 
 class CParser;

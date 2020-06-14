@@ -153,7 +153,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="CClientContext.cpp" />
+    <ClCompile Include="CBuffer.cpp" />
     <ClCompile Include="CClientRoutine.Cpp" />
     <ClCompile Include="CMySQLRoutine.cpp" />
     <ClCompile Include="CLogger.cpp" />
@@ -162,7 +162,7 @@
     <ClCompile Include="iocpserver.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="CClientContext.h" />
+    <ClInclude Include="CBuffer.h" />
     <ClInclude Include="CClientRoutine.h" />
     <ClInclude Include="CMySQLRoutine.h" />
     <ClInclude Include="CLogger.h" />

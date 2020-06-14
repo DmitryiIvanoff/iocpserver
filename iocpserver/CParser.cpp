@@ -47,7 +47,7 @@ void CParser::ParseClientCredentials(std::string& message, const mysqlPacketInfo
 
 	std::string payload(offset, messageLength);
 
-	//parse login data
+	//парсим креденшелы
 	const mysqlLoginClientInfo loginInfo = getLoginInfo(payload);
 
 	size_t capability = loginInfo.capability;

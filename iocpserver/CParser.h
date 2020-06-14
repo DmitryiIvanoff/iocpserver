@@ -1,6 +1,5 @@
 #pragma once
 #include <string>
-#include "CClientContext.h"
 
 struct mysqlPacketInfo;
 
