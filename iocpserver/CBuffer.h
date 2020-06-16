@@ -10,7 +10,8 @@ enum enIOOperation {
 	SendToClient,
 	ReadFromClient,
 	WriteToClient,
-	ReadFromIOCP
+	ReadFromIOCP,
+	ErrorInDB
 };
 
 

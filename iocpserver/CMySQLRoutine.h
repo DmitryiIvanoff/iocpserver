@@ -11,22 +11,18 @@ typedef std::shared_ptr<CMySQLRoutine> MySQLRoutinePtr;
 
 class CMySQLRoutine : public IRoutine {
 public:
-	static MySQLRoutinePtr GetInstance(const int threadCount, const std::string listenPort) {
-		if (!currentRoutine) {
-			//Значение currentRoutine присвоится в конструкторе, я зимплементил такое поведение 
-			//т.к. в конструкторе стартуют рабочие потоки в которых нужен уже инициализированный умный указатель currentRoutine
-			new CMySQLRoutine(threadCount, listenPort);
-		}
-		return currentRoutine;
-	}
+	static MySQLRoutinePtr GetInstance(const int threadCount, const std::string listenPort);
+
 	~CMySQLRoutine();
 
-	void SetHelperIOCP(const HANDLE compPort) override { clientIOCP = compPort; }
+	void SetHelperIOCP(const HANDLE compPort) override { m_hClientIOCP = compPort; }
 
 	HANDLE GetIOCP() const override { return m_hIOCP; }
 
 private:
 	CMySQLRoutine(const int threadCount, const std::string mySQLPosrt);
+
+	CMySQLRoutine() = delete;
 
 	//хендлит все операции с портом завершения
 	static int WorkerThread();
@@ -45,7 +41,7 @@ private:
 
 private:
 	//хендл порта завершения рутины, обслуживающей клиентов
-	HANDLE clientIOCP;
+	HANDLE m_hClientIOCP;
 	//хендл порта завершения
 	HANDLE m_hIOCP;
 	//контейнер для рабочих потоков

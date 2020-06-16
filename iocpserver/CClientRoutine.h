@@ -14,14 +14,7 @@ typedef std::shared_ptr<CClientRoutine> ClientRoutinePtr;
 class CClientRoutine : public IRoutine {
 public:
 	
-	static ClientRoutinePtr GetInstance(const int threadCount, const std::string listenPort) {
-		if (!currentRoutine) {
-			//Значение currentRoutine присвоится в конструкторе, я зимплементил такое поведение 
-			//т.к. в конструкторе стартуют рабочие потоки в которых нужен уже инициализированный умный указатель currentRoutine
-			new CClientRoutine(threadCount, listenPort);
-		}
-		return currentRoutine;
-	}
+	static ClientRoutinePtr GetInstance(const int threadCount, const std::string listenPort);
 
 	~CClientRoutine();
 	
@@ -38,7 +31,9 @@ private:
 
 	CClientRoutine(const int threadCount, const std::string listenPort);
 
-	void AddNewSession(BufferPtr buffer);
+	CClientRoutine() = delete;
+
+	void AddNewSession(const BufferPtr buffer);
 
 	void RemoveSession(BufferPtr buffer);
 
@@ -46,16 +41,16 @@ private:
 
 	static int WorkerThread();
 
-	void UpdateCompletionPort(BufferPtr& buffer, SOCKET sdClient);
+	void UpdateCompletionPort(BufferPtr& buffer, const SOCKET sdClient);
 
 	bool PostToIOCP(CBuffer* buffer);
 
 	bool RecvBufferAsync(BufferPtr buffer);
-	bool SendBufferAsync(BufferPtr buffer);
+	bool SendBufferAsync(const BufferPtr buffer);
 
 	BufferPtr GetNextBuffer();
 
-	void AddBufferInQueue(BufferPtr& buffer);
+	void AddBufferInQueue(const BufferPtr buffer);
 
 	void RemoveBufferFromQueue(BufferPtr buffer);
 
@@ -86,7 +81,7 @@ private:
 	std::vector<size_t> m_vRemovedBufferNumbers;
 	//контейнер для хранения данных, связанных с каждым вновь подключенным клиентом. Буфер хранится в контейнере в течении сессии,
 	//данные шарятся между своими потоками и потоками вспомогательной рутины, работающей mysql БД.
-	std::vector<BufferPtr> m_vConnectedClients;
+	std::map<size_t, BufferPtr> m_mClients;
 	//контейнер для рабочих потоков
 	std::vector<std::shared_ptr<std::thread>> m_vWorkerPayloads;
 

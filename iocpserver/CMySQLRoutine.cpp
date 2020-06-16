@@ -14,30 +14,39 @@ bool CMySQLRoutine::ConsoleEventHandler(DWORD dwEvent) {
 	SOCKET sockTemp = INVALID_SOCKET;
 
 	switch (dwEvent) {
-	case CTRL_C_EVENT:
-	case CTRL_LOGOFF_EVENT:
-	case CTRL_SHUTDOWN_EVENT:
-	case CTRL_CLOSE_EVENT:
-		if (!currentRoutine) {
-			return false;
-		}
-
-		if (currentRoutine->m_hIOCP) {
-			for (size_t i = 0; i < currentRoutine->m_vWorkerPayloads.size(); i++) {
-				PostQueuedCompletionStatus(currentRoutine->m_hIOCP, 0, 0, nullptr);
+		case CTRL_C_EVENT:
+		case CTRL_LOGOFF_EVENT:
+		case CTRL_SHUTDOWN_EVENT:
+		case CTRL_CLOSE_EVENT:
+			if (!currentRoutine) {
+				return false;
 			}
-		}
 
-		break;
+			if (currentRoutine->m_hIOCP) {
+				for (size_t i = 0; i < currentRoutine->m_vWorkerPayloads.size(); i++) {
+					PostQueuedCompletionStatus(currentRoutine->m_hIOCP, 0, 0, nullptr);
+				}
+			}
 
-	default:
-		return false;
+			break;
+
+		default:
+			return false;
 	}
 	return true;
 }
 
+MySQLRoutinePtr CMySQLRoutine::GetInstance(const int threadCount, const std::string listenPort) {
+	if (!currentRoutine) {
+		//Значение currentRoutine присвоится в конструкторе, я зимплементил такое поведение 
+		//т.к. в конструкторе стартуют рабочие потоки в которых нужен уже инициализированный умный указатель currentRoutine
+		new CMySQLRoutine(threadCount, listenPort);
+	}
+	return currentRoutine;
+}
+
 CMySQLRoutine::CMySQLRoutine(const int threadCount,const std::string mySQLPort) :
-	clientIOCP(INVALID_HANDLE_VALUE),
+	m_hClientIOCP(INVALID_HANDLE_VALUE),
 	m_hIOCP(INVALID_HANDLE_VALUE),
 	m_dThreadCount(threadCount),
 	m_sMySQLPort(mySQLPort)
@@ -72,7 +81,7 @@ CMySQLRoutine::CMySQLRoutine(const int threadCount,const std::string mySQLPort) 
 		m_vWorkerPayloads.push_back(std::move(workThread));
 	}
 
-	m_pLogger = CLogger::GetLogger();
+	m_pLogger = CLogger::GetInstance();
 
 }
 
@@ -181,7 +190,8 @@ int CMySQLRoutine::WorkerThread() {
 		}
 
 		if (!bSuccess || (bSuccess && (dwIoSize == 0))) {
-			//server->RemoveSession(buffer);
+			buffer->IOOperation = ErrorInDB;
+			currentRoutine->PostToIOCP(buffer.get());
 			continue;
 		}
 		
@@ -214,7 +224,8 @@ void CMySQLRoutine::OnClientAccepted(BufferPtr buffer) {
 	if (!buffer->m_dMySQLSocket)
 	{
 		std::cout << "Error..." << std::endl;
-		//server->RemoveSession(buffer);
+		buffer->IOOperation = ErrorInDB;
+		PostToIOCP(buffer.get());
 		return;
 	}
 	RecvBuffer(buffer->m_dMySQLSocket, buffer);
@@ -226,13 +237,15 @@ void CMySQLRoutine::OnClientDataReceived(BufferPtr buffer) {
 
 	if (!SendBuffer(buffer->m_dMySQLSocket, buffer)) {
 		std::cout << "MySQL[" << std::this_thread::get_id() << "]: Send failed: " << WSAGetLastError() << std::endl;;
-		//server->RemoveSession(buffer);
+		buffer->IOOperation = ErrorInDB;
+		PostToIOCP(buffer.get());
 		return;
 	}
 
 	if (!RecvBuffer(buffer->m_dMySQLSocket, buffer)) {
 		std::cout << "MySQL[" << std::this_thread::get_id() << "]: Receive failed: " << WSAGetLastError() << std::endl;
-		//server->RemoveSession(buffer);
+		buffer->IOOperation = ErrorInDB;
+		PostToIOCP(buffer.get());
 		return;
 	}
 
@@ -242,7 +255,7 @@ void CMySQLRoutine::OnClientDataReceived(BufferPtr buffer) {
 bool CMySQLRoutine::PostToIOCP(CBuffer* bufferPtr) {
 	
 	size_t size = sizeof(*bufferPtr);
-	return PostQueuedCompletionStatus(clientIOCP, size, (DWORD)(bufferPtr), &(bufferPtr->overlapped));
+	return PostQueuedCompletionStatus(m_hClientIOCP, size, (DWORD)(bufferPtr), &(bufferPtr->overlapped));
 }
 
 bool CMySQLRoutine::RecvBuffer(SOCKET recvSocket, BufferPtr buffer) {

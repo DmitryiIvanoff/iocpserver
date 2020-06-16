@@ -16,32 +16,41 @@ bool CClientRoutine::ConsoleEventHandler(DWORD dwEvent) {
 	SOCKET sockTemp = INVALID_SOCKET;
 
 	switch (dwEvent) {
-	case CTRL_C_EVENT:
-	case CTRL_LOGOFF_EVENT:
-	case CTRL_SHUTDOWN_EVENT:
-	case CTRL_CLOSE_EVENT:
-		if (!currentRoutine) {
-			return false;
-		}
-
-		if (currentRoutine->m_hIOCP) {
-			for (size_t i = 0; i < currentRoutine->m_vWorkerPayloads.size(); i++) {
-				PostQueuedCompletionStatus(currentRoutine->m_hIOCP, 0, 0, nullptr);
+		case CTRL_C_EVENT:
+		case CTRL_LOGOFF_EVENT:
+		case CTRL_SHUTDOWN_EVENT:
+		case CTRL_CLOSE_EVENT:
+			if (!currentRoutine) {
+				return false;
 			}
-		}
 
-		//выходим из цикла в CClientRoutine::Start
-		sockTemp = currentRoutine->m_dListenSocket;
-		currentRoutine->m_dListenSocket = INVALID_SOCKET;
-		g_bEndServer = true;
-		closesocket(sockTemp);
-		sockTemp = INVALID_SOCKET;
-		break;
+			if (currentRoutine->m_hIOCP) {
+				for (size_t i = 0; i < currentRoutine->m_vWorkerPayloads.size(); i++) {
+					PostQueuedCompletionStatus(currentRoutine->m_hIOCP, 0, 0, nullptr);
+				}
+			}
 
-	default:
-		return false;
+			//выходим из цикла в CClientRoutine::Start
+			sockTemp = currentRoutine->m_dListenSocket;
+			currentRoutine->m_dListenSocket = INVALID_SOCKET;
+			g_bEndServer = true;
+			closesocket(sockTemp);
+			sockTemp = INVALID_SOCKET;
+			break;
+
+		default:
+			return false;
 	}
 	return true;
+}
+
+ClientRoutinePtr CClientRoutine::GetInstance(const int threadCount, const std::string listenPort) {
+	if (!currentRoutine) {
+		//Значение currentRoutine присвоится в конструкторе, я зимплементил такое поведение 
+		//т.к. в конструкторе стартуют рабочие потоки в которых нужен уже инициализированный умный указатель currentRoutine
+		new CClientRoutine(threadCount, listenPort);
+	}
+	return currentRoutine;
 }
 
 CClientRoutine::CClientRoutine(int threadCount, const std::string port) :
@@ -86,7 +95,7 @@ CClientRoutine::CClientRoutine(int threadCount, const std::string port) :
 		m_vWorkerPayloads.push_back(std::move(workThread));
 	}	
 
-	m_pLogger = CLogger::GetLogger();
+	m_pLogger = CLogger::GetInstance();
 }
 
 void CClientRoutine::Start() {
@@ -153,10 +162,10 @@ CClientRoutine::~CClientRoutine() {
 	}
 
 	//не используем итераторы для динамически изменяемого контейнера, иначе м.б. ошибка когда итератор == nullptr
-	for (size_t i = 0; i < m_vConnectedClients.size(); i++) {
-		RemoveSession(m_vConnectedClients[i]);
+	for (size_t i = 0; i < m_mClients.size(); i++) {
+		RemoveSession(m_mClients[i]);
 	}
-	m_vConnectedClients.clear();
+	m_mClients.clear();
 
 	if (m_hIOCP) {
 		CloseHandle(m_hIOCP);
@@ -275,12 +284,12 @@ int CClientRoutine::WorkerThread() {
 			buffer->nTotalBytes = dwIoSize;
 			currentRoutine->OnClientDataReceived(buffer);
 			break;
-		case ReadFromClient:
-			std::cout << "Incorrect sequence" << std::endl;
-			break;
 		case SendToClient:
 			//Ответ из БД получен ч/з рутину, обслуживающуюу БД, шлем его асинхронно клиенту.
 			currentRoutine->OnMySQLDataReceived(buffer);
+			break;
+		case ErrorInDB:
+			currentRoutine->RemoveSession(buffer);
 			break;
 		default:
 			std::cout << "Incorrect sequence." << std::endl;
@@ -352,7 +361,7 @@ bool CClientRoutine::RecvBufferAsync(BufferPtr buffer) {
 	return true;
 }
 
-bool CClientRoutine::SendBufferAsync(BufferPtr buffer) {
+bool CClientRoutine::SendBufferAsync(const BufferPtr buffer) {
 	
 	BufferPtr pBuffer = GetNextBuffer();
 
@@ -381,7 +390,7 @@ bool CClientRoutine::SendBufferAsync(BufferPtr buffer) {
 }
 
 //Аллоцирует контекст для сокета для нового соединения и связывает сокет с портом завершения.
-void CClientRoutine::UpdateCompletionPort(BufferPtr& buffer, SOCKET sdClient) {
+void CClientRoutine::UpdateCompletionPort(BufferPtr& buffer, const SOCKET sdClient) {
 
 	buffer.reset(new CBuffer(sdClient));
 	if (!buffer.get()) {
@@ -402,15 +411,16 @@ void CClientRoutine::UpdateCompletionPort(BufferPtr& buffer, SOCKET sdClient) {
 	AddNewSession(buffer);
 }
 
-void CClientRoutine::AddNewSession(BufferPtr buffer) {
+void CClientRoutine::AddNewSession(const BufferPtr buffer) {
 
 	std::lock_guard<std::mutex> lock(m_mBufferSync);
 	
-	m_vConnectedClients.push_back(std::move(buffer));
+	m_mClients.insert(std::pair<size_t, BufferPtr>(buffer->m_dSessionId, std::move(buffer)));
 
 }
 
 BufferPtr CClientRoutine::GetNextBuffer() {
+
 	std::lock_guard<std::mutex> lock(m_mBufferSync);
 	auto removedItemIt = std::find(m_vRemovedBufferNumbers.begin(), m_vRemovedBufferNumbers.end(), m_dOutgoingSequence);
 
@@ -433,9 +443,13 @@ BufferPtr CClientRoutine::GetNextBuffer() {
 }
 
 BufferPtr CClientRoutine::ProcessNextBuffer() {
+
 	std::lock_guard<std::mutex> lock(m_mBufferSync);
+
 	InterlockedIncrement(&m_dOutgoingSequence);
+
 	BufferPtr nextPtr = nullptr;
+
 	auto it = m_mBuffer.begin();
 
 	if (it != m_mBuffer.end() && it->second != nullptr && it->second->sequenceNumber == m_dOutgoingSequence 
@@ -456,14 +470,14 @@ void CClientRoutine::RemoveBufferFromQueue(BufferPtr buffer) {
 
 		m_vRemovedBufferNumbers.push_back(it->first);
 
-		/*it->second.reset(); - объект уничтожится в деструкторе*/ 
+		buffer.reset();
 
 		m_mBuffer.erase(it);
 		
 	}
 }
 
-void CClientRoutine::AddBufferInQueue(BufferPtr& buffer) {
+void CClientRoutine::AddBufferInQueue(const BufferPtr buffer) {
 
 	std::lock_guard<std::mutex> lock(m_mBufferSync);
 
@@ -479,13 +493,15 @@ void CClientRoutine::RemoveSession(BufferPtr buffer) {
 
 	std::lock_guard<std::mutex> lock(m_mBufferSync);
 
-	auto it = std::find(m_vConnectedClients.begin(), m_vConnectedClients.end(), buffer);
+	auto it = m_mClients.find(buffer->m_dSessionId);
 			
-	if (it != m_vConnectedClients.end()) {
+	if (it != m_mClients.end()) {
 
-		RemoveBufferFromQueue(*it);
-		it->reset();
-		m_vConnectedClients.erase(it);
+		RemoveBufferFromQueue(it->second);
+
+		buffer.reset();
+
+		m_mClients.erase(it);
 	}
 	
 }

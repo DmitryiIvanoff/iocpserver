@@ -15,7 +15,7 @@ class CLogger
 {
 public:
 	//инстанцирует логгер если он еще не создан.
-	static LoggerPtr GetLogger();
+	static LoggerPtr GetInstance();
 	void Write(BufferPtr buffer);
 	~CLogger();
 

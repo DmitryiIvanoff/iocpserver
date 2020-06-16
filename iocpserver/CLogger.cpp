@@ -14,7 +14,7 @@ CLogger::CLogger() {
 	m_stream.open(CLogger::FILE_NAME, std::fstream::out | std::fstream::app);
 }
 
-LoggerPtr CLogger::GetLogger()
+LoggerPtr CLogger::GetInstance()
 {
 	if (!m_pLogger) {
 		m_pLogger.reset(new CLogger());
@@ -24,6 +24,8 @@ LoggerPtr CLogger::GetLogger()
 
 CLogger::~CLogger() {
 	m_stream.close();
+	m_pParser.reset();
+	m_pLogger.reset();
 }
 
 const std::string CLogger::GetCurrentDateTime() {
