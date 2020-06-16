@@ -33,8 +33,6 @@ private:
 
 	CClientRoutine() = delete;
 
-	void AddNewSession(const BufferPtr buffer);
-
 	void RemoveSession(BufferPtr buffer);
 
 	SOCKET CreateSocket(const std::string port, const bool isListenSocket);
@@ -50,6 +48,7 @@ private:
 
 	BufferPtr GetNextBuffer();
 
+	void AddNewSession(const BufferPtr buffer);
 	void AddBufferInQueue(const BufferPtr buffer);
 
 	void RemoveBufferFromQueue(BufferPtr buffer);
