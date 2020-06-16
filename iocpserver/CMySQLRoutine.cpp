@@ -1,6 +1,7 @@
 #include <Ws2tcpip.h>
 #include <iostream>
 #include <chrono>
+#include <sstream>
 #include "CMySQLRoutine.h"
 
 
@@ -54,12 +55,12 @@ CMySQLRoutine::CMySQLRoutine(const int threadCount,const std::string mySQLPort) 
 	WSADATA wsaData;
 
 	if (!SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CMySQLRoutine::ConsoleEventHandler), true)) {
-		std::cout << "MySQL: SetConsoleCtrlHandler() failed to install console handler:" << GetLastError() << std::endl;
+		m_pLogger->Error("MySQL: SetConsoleCtrlHandler() failed to install console handler:" + GetLastError() );
 		return;
 	}
 	//инициализируем использование Winsock DLL процессом.
 	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-		std::cout << "MySQL:WSAStartup() failed" << std::endl;
+		m_pLogger->Error("MySQL:WSAStartup() failed" );
 		SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CMySQLRoutine::ConsoleEventHandler), false);
 		return;
 	}
@@ -67,7 +68,7 @@ CMySQLRoutine::CMySQLRoutine(const int threadCount,const std::string mySQLPort) 
 	//создаем порт завершения. Тут INVALID_HANDLE_VALUE сообщает системе что нужно создать новый порт завершения.
 	m_hIOCP = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
 	if (m_hIOCP == nullptr) {
-		std::cout << "MySQL:CreateIoCompletionPort() failed to create I/O completion port: " << GetLastError() << std::endl;
+		m_pLogger->Error("MySQL:CreateIoCompletionPort() failed to create I/O completion port: " + GetLastError() );
 		return;
 	}
 
@@ -103,7 +104,13 @@ CMySQLRoutine::~CMySQLRoutine() {
 			it->reset();
 		}
 		else {
-			std::cout << "MySQL: Thread[" << it->get()->get_id() << "] not stopped." << std::endl;
+			auto threadId = it->get()->get_id();
+
+			std::stringstream ss;
+
+			ss << threadId;
+
+			m_pLogger->Error("Thread[" + ss.str() + "] not stopped.");
 		}
 
 	}
@@ -135,7 +142,7 @@ SOCKET CMySQLRoutine::CreateSocket(std::string port) {
 
 	//конвертим адресс. В этом методе аллоцируется память для указателя addrlocal. 
 	if (getaddrinfo("127.0.0.1", port.c_str(), &hints, &addrlocal) != 0 || !addrlocal) {
-		std::cout << "MySQL: getaddrinfo() failed with error " << WSAGetLastError() << std::endl;
+		m_pLogger->Error("MySQL: getaddrinfo() failed with error " + WSAGetLastError() );
 		return NULL;
 	}
 #else
@@ -143,26 +150,26 @@ SOCKET CMySQLRoutine::CreateSocket(std::string port) {
 
 	//конвертим адресс. В этом методе аллоцируется память для указателя addrlocal. 
 	if (getaddrinfo(nullptr, port.c_str(), &hints, &addrlocal) != 0 || !addrlocal) {
-		std::cout << "MySQL: getaddrinfo() failed with error " << WSAGetLastError() << std::endl;
+		m_pLogger->Error("MySQL: getaddrinfo() failed with error " + WSAGetLastError() );
 		return NULL;
 	}
 #endif
 
 	socket = WSASocket(addrlocal->ai_family, addrlocal->ai_socktype, addrlocal->ai_protocol, nullptr, 0, WSA_FLAG_OVERLAPPED);
 	if (socket == INVALID_SOCKET) {
-		std::cout << "MySQL: WSASocket(g_sdListen) failed: " << WSAGetLastError() << std::endl;
+		m_pLogger->Error("MySQL: WSASocket(g_sdListen) failed: " + WSAGetLastError() );
 		return NULL;
 	}
 
 	const char chOpt = 1;
 	if ((setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, &chOpt, sizeof(char))) == SOCKET_ERROR) {
-		std::cout << "setsockopt failed: " << WSAGetLastError() << std::endl;
+		m_pLogger->Error("setsockopt failed: " + WSAGetLastError() );
 		return NULL;
 
 	}
 	if (connect(socket, addrlocal->ai_addr, (int)addrlocal->ai_addrlen) < 0)
 	{
-		std::cout << "MySQL:  error " << WSAGetLastError() << " in connect" << std::endl;
+		m_pLogger->Error("MySQL:  error " + WSAGetLastError());
 		return NULL;
 	}
 	//деаллоцируем структуру addrlocal.
@@ -206,14 +213,13 @@ int CMySQLRoutine::WorkerThread() {
 			currentRoutine->OnClientDataReceived(buffer);
 			break;
 		default:
-			std::cout << "Incorrect sequence" << std::endl;
+			currentRoutine->m_pLogger->Error("Incorrect sequence" );
 			break;
 		}
 
 		buffer.reset();
 		lpOverlapped = nullptr;
 	}
-	std::cout << "Thread ended" << std::endl;
 	return 0;
 }
 
@@ -223,7 +229,7 @@ void CMySQLRoutine::OnClientAccepted(BufferPtr buffer) {
 
 	if (!buffer->m_dMySQLSocket)
 	{
-		std::cout << "Error..." << std::endl;
+		m_pLogger->Error("Error..." );
 		buffer->IOOperation = ErrorInDB;
 		PostToIOCP(buffer.get());
 		return;
@@ -236,14 +242,14 @@ void CMySQLRoutine::OnClientDataReceived(BufferPtr buffer) {
 	buffer->IOOperation = SendToClient;
 
 	if (!SendBuffer(buffer->m_dMySQLSocket, buffer)) {
-		std::cout << "MySQL[" << std::this_thread::get_id() << "]: Send failed: " << WSAGetLastError() << std::endl;;
+		m_pLogger->Error("MySQL Send failed: " + WSAGetLastError() );
 		buffer->IOOperation = ErrorInDB;
 		PostToIOCP(buffer.get());
 		return;
 	}
 
 	if (!RecvBuffer(buffer->m_dMySQLSocket, buffer)) {
-		std::cout << "MySQL[" << std::this_thread::get_id() << "]: Receive failed: " << WSAGetLastError() << std::endl;
+		m_pLogger->Error("MySQL Receive failed: " + WSAGetLastError() );
 		buffer->IOOperation = ErrorInDB;
 		PostToIOCP(buffer.get());
 		return;

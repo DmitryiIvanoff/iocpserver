@@ -6,12 +6,16 @@
 #include "CLogger.h"
 #include "CParser.h"
 
-std::string CLogger::FILE_NAME = "log.txt";
+std::string CLogger::LOG_FILE_NAME = "log.txt";
+std::string CLogger::ERROR_FILE_NAME = "log.txt";
 LoggerPtr CLogger::m_pLogger = nullptr;
 
 CLogger::CLogger() {
 	m_pParser.reset(new CParser());
-	m_stream.open(CLogger::FILE_NAME, std::fstream::out | std::fstream::app);
+	
+	m_sLogSream.open(CLogger::LOG_FILE_NAME, std::fstream::out | std::fstream::app);
+
+	m_sErrorSream.open(CLogger::ERROR_FILE_NAME, std::fstream::out | std::fstream::app);
 }
 
 LoggerPtr CLogger::GetInstance()
@@ -23,9 +27,22 @@ LoggerPtr CLogger::GetInstance()
 }
 
 CLogger::~CLogger() {
-	m_stream.close();
+	m_sLogSream.close();
+	m_sErrorSream.close();
+
+	while (!m_mLogSync.try_lock()) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+	m_mLogSync.unlock();
+
+	while (!m_mErrorSync.try_lock()) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+	m_mErrorSync.unlock();
+
 	m_pParser.reset();
 	m_pLogger.reset();
+
 }
 
 const std::string CLogger::GetCurrentDateTime() {
@@ -39,6 +56,21 @@ const std::string CLogger::GetCurrentDateTime() {
 	return buf;
 }
 
+void CLogger::Error(const std::string& error) {
+	std::lock_guard<std::mutex> lock(m_pLogger->m_mErrorSync);
+
+	std::stringstream ss;
+
+	ss << GetCurrentDateTime() << " [" << std::this_thread::get_id() << ":UND]" << error << "\n";
+
+	if (m_pLogger->m_sErrorSream.is_open()) {
+		m_pLogger->m_sErrorSream << ss.rdbuf();
+	}
+	else
+	{
+		std::cout << "Error log: file not opened" << std::endl;
+	}
+}
 
 void CLogger::Write(BufferPtr buffer) {
 
@@ -61,13 +93,11 @@ void CLogger::Write(BufferPtr buffer) {
 
 	ss << GetCurrentDateTime() << " [" << std::this_thread::get_id() << ":" << buffer->m_dSessionId << "]" << sLog << "\n";
 
-	if (m_pLogger->m_stream.is_open()) {
-		m_pLogger->m_stream << ss.rdbuf();
+	if (m_pLogger->m_sLogSream.is_open()) {
+		m_pLogger->m_sLogSream << ss.rdbuf();
 	}
 	else
 	{
-		std::cout << "Error: file not opened" << std::endl;
+		Error("Error: file not opened");
 	}
-	
-	
 }

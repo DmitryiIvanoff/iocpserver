@@ -1,6 +1,7 @@
 #include <Ws2tcpip.h>
 #include <iostream>
 #include <chrono>
+#include <sstream>
 #include "CClientRoutine.h"
 
 #pragma warning( disable : 4996)
@@ -64,19 +65,21 @@ CClientRoutine::CClientRoutine(int threadCount, const std::string port) :
 	WSADATA wsaData;
 		
 	if (!SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CClientRoutine::ConsoleEventHandler), true)) {
-		std::cout << "SetConsoleCtrlHandler() failed to install console handler:" << GetLastError() << std::endl;
+				
+		m_pLogger->Error("SetConsoleCtrlHandler() failed to install console handler: " + GetLastError());
+		
 		return;
 	}
 
 	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-		std::cout << "WSAStartup() failed" << std::endl;
+		m_pLogger->Error("WSAStartup() failed");
 		SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CClientRoutine::ConsoleEventHandler), false);
 		return;
 	}
 
 	m_hIOCP = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
 	if (m_hIOCP == nullptr) {
-		std::cout << "CreateIoCompletionPort() failed to create I/O completion port: " << GetLastError() << std::endl;
+		m_pLogger->Error("CreateIoCompletionPort() failed to create I/O completion port: " + GetLastError());
 		return;
 	}
 
@@ -114,7 +117,7 @@ void CClientRoutine::Start() {
 		if (sdClient == SOCKET_ERROR) {
 
 			//Ќажали Ctrl+C
-			std::cout << "WSAAccept() failed: " << WSAGetLastError() << std::endl;
+			m_pLogger->Error("WSAAccept() failed: " + WSAGetLastError());
 			break;
 		}
 
@@ -156,7 +159,13 @@ CClientRoutine::~CClientRoutine() {
 			it->reset();
 		}
 		else {
-			std::cout << "Thread[" << it->get()->get_id() << "] not stopped." << std::endl;
+			auto threadId = it->get()->get_id();
+
+			std::stringstream ss;
+
+			ss << threadId;
+
+			m_pLogger->Error("Thread[" + ss.str() + "] not stopped.");
 		}
 		
 	}
@@ -198,26 +207,26 @@ SOCKET CClientRoutine::CreateSocket(const std::string port, const bool isListenS
 
 	//конвертим адресс. ¬ этом методе аллоцируетс€ пам€ть дл€ указател€ addrlocal. 
 	if(getaddrinfo(nullptr, port.c_str(), &hints, &addrlocal) != 0  || !addrlocal) {
-		std::cout << "getaddrinfo() failed with error " << WSAGetLastError() << std::endl;
+		m_pLogger->Error("getaddrinfo() failed with error " + WSAGetLastError());
         return NULL;
 	}
 	//создаем сокет
 	socket = WSASocket(addrlocal->ai_family, addrlocal->ai_socktype, addrlocal->ai_protocol, NULL, 0, WSA_FLAG_OVERLAPPED);
 	if(socket == INVALID_SOCKET ) {
-		std::cout << "WSASocket(g_sdListen) failed: " << WSAGetLastError() << std::endl;
+		m_pLogger->Error("WSASocket(g_sdListen) failed: " + WSAGetLastError());
 		return NULL;
 	}
 
 	if (!isListenSocket) {
 		const char chOpt = 1;
 		if ((setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, &chOpt, sizeof(char))) == SOCKET_ERROR) {
-			std::cout << "setsockopt failed: " << WSAGetLastError() << std::endl;
+			m_pLogger->Error("setsockopt failed: " + WSAGetLastError());
 				return NULL;
 
 		}
 		if ((connect(socket, addrlocal->ai_addr, (int)addrlocal->ai_addrlen)) < 0)
 		{
-			std::cout << "MySQL:  error " << WSAGetLastError() << " in connect" << std::endl;
+			m_pLogger->Error("MySQL:  error " + WSAGetLastError());
 			return NULL;
 		}
 		
@@ -227,20 +236,20 @@ SOCKET CClientRoutine::CreateSocket(const std::string port, const bool isListenS
 
 	//ассоциируем сокет с конвертируемым ранее адресом
 	if(bind(socket, addrlocal->ai_addr, (int)addrlocal->ai_addrlen) == SOCKET_ERROR ) {
-		std::cout << "bind() failed: " << WSAGetLastError() << std::endl;
+		m_pLogger->Error("bind() failed: " + WSAGetLastError());
 		return NULL;
 	}
 
 	//переводим сокет в режим прослушивани€ с максимальной длиной очереди  == количеству потоков
 	if(listen(socket, m_dThreadCount) == SOCKET_ERROR ) {
-		std::cout << "listen() failed: " << WSAGetLastError() << std::endl;
+		m_pLogger->Error("listen() failed: " + WSAGetLastError());
 		return NULL;
 	}
 
 	//устанавливаем размер буфера 0 (SO_SNDBUF).
 	//int nZero = 0;
 	//if(setsockopt(socket, SOL_SOCKET, SO_SNDBUF, (char *)&nZero, sizeof(nZero)) == SOCKET_ERROR ) {
-	//	//std::cout << "Error: " << WSAGetLastError() << std::endl;
+	//	//m_pLogger->Error("Error: " + WSAGetLastError());
 	//	return NULL;
 	//}
 
@@ -292,7 +301,7 @@ int CClientRoutine::WorkerThread() {
 			currentRoutine->RemoveSession(buffer);
 			break;
 		default:
-			std::cout << "Incorrect sequence." << std::endl;
+			currentRoutine->m_pLogger->Error("Incorrect sequence.");
 		}
 
 		buffer.reset();
@@ -308,7 +317,7 @@ void CClientRoutine::OnClientDataSended(BufferPtr buffer) {
 
 	if (!RecvBufferAsync(buffer)) {
 
-		std::cout << "Receive failed: " << WSAGetLastError() << std::endl;
+		m_pLogger->Error("Receive failed: " + WSAGetLastError());
 		RemoveSession(buffer);
 	}
 }
@@ -330,7 +339,7 @@ void CClientRoutine::OnMySQLDataReceived(BufferPtr buffer) {
 
 	if (!SendBufferAsync(buffer)) {
 
-		std::cout << "Send failed: " << WSAGetLastError() << std::endl;
+		m_pLogger->Error("Send failed: " + WSAGetLastError());
 		RemoveSession(buffer);
 	}
 }
@@ -354,7 +363,8 @@ bool CClientRoutine::RecvBufferAsync(BufferPtr buffer) {
 
 	if(WSARecv(buffer->m_dClientSocket, buffRecv, 1, &totalBytes, &dwFlags, pOverlapped, nullptr) == SOCKET_ERROR
 		&& (ERROR_IO_PENDING != WSAGetLastError())) {
-		std::cout << "WSArecvBuffer: error " << WSAGetLastError() << " in receive" << std::endl;
+
+		m_pLogger->Error("WSArecvBuffer: error " + WSAGetLastError());
 		return false;
 	}
 		
@@ -378,7 +388,9 @@ bool CClientRoutine::SendBufferAsync(const BufferPtr buffer) {
 
 		if (WSASend(pBuffer->m_dClientSocket, buffSend, 1, nullptr, dwFlags, pOverlapped, nullptr) == SOCKET_ERROR
 			&& (ERROR_IO_PENDING != WSAGetLastError())) {
-			std::cout << "WSASendBuffer: error " << WSAGetLastError() << " in send" << std::endl;
+			
+			m_pLogger->Error("WSASendBuffer: error " + WSAGetLastError());
+
 			return false;
 		}
 
@@ -400,7 +412,9 @@ void CClientRoutine::UpdateCompletionPort(BufferPtr& buffer, const SOCKET sdClie
 	//свзыввем хендл сокета клиента с портом завершени€, иными словами оповещаем порт завершени€ о том что хотим наблюдать за этим сокетом
 	m_hIOCP = CreateIoCompletionPort(reinterpret_cast<HANDLE>(sdClient), m_hIOCP, reinterpret_cast<DWORD_PTR>(buffer.get()), 0);
 	if(!m_hIOCP) {
-		std::cout << "CreateIoCompletionPort() failed: " << GetLastError() << std::endl;
+		
+		m_pLogger->Error("CreateIoCompletionPort() failed: " + GetLastError());
+
 		buffer.reset();
 		return;
 	}
