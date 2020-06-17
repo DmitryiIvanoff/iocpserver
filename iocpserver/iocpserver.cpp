@@ -2,7 +2,7 @@
 #include <string>
 #include "IOCPProxyLoggingServer.h"
 
-bool g_bEndServer = false;
+bool g_bEndServer;
 static std::string g_sClientPort = "4000";
 static std::string g_sMySQLPort = "3306";
 const int g_dDBThreadsCount = 16;
