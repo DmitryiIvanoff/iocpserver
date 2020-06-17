@@ -7,7 +7,7 @@
 #include "CParser.h"
 
 std::string CLogger::LOG_FILE_NAME = "log.txt";
-std::string CLogger::ERROR_FILE_NAME = "log.txt";
+std::string CLogger::ERROR_FILE_NAME = "error_log.txt";
 LoggerPtr CLogger::m_pLogger = nullptr;
 
 CLogger::CLogger() {
@@ -72,10 +72,14 @@ void CLogger::Error(const std::string& error) {
 	}
 }
 
-void CLogger::Write(BufferPtr buffer) {
+void CLogger::Write(CBuffer* buffer) {
 
 	std::lock_guard<std::mutex> lock(m_pLogger->m_mLogSync);
 	
+	if (!buffer) {
+		return;
+	}
+
 	const char* log = buffer->buffer;
 	size_t length = buffer->nTotalBytes;
 	enIOOperation opCode = buffer->IOOperation;

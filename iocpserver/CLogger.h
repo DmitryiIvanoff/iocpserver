@@ -17,7 +17,7 @@ public:
 	//инстанцирует логгер если он еще не создан.
 	static LoggerPtr GetInstance();
 
-	void Write(BufferPtr buffer);
+	void Write(CBuffer* buffer);
 
 	void Error(const std::string& error);
 

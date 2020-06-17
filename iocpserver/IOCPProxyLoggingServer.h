@@ -9,11 +9,12 @@ public:
 
 	~CIOCPProxyLoggingServer();
 
-	static void startClientRoutineInThread(CClientRoutine* routine);
+	//запускаем метод CClientRoutine::Run  в отдельном потоке чтобы не блокировать основной.
+	static void StartClientRoutineInThread(CClientRoutine* routine);
 
 private:
 	//NOTE: классы CMySQLRoutine и CClientRoutine синглтоны.
-	ClientRoutinePtr clientRoutine;
-	MySQLRoutinePtr mySQLRoutine;
-	std::thread threadClientRoutine;
+	CClientRoutine* m_pClientRoutine;
+	CMySQLRoutine* m_pMySQLRoutine;
+	std::thread m_tForClientRoutine;
 };

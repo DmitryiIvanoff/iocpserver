@@ -8,7 +8,7 @@
 
 extern bool g_bEndServer;
 
-ClientRoutinePtr CClientRoutine::currentRoutine = nullptr;
+CClientRoutine* CClientRoutine::currentRoutine = nullptr;
 
 size_t CClientRoutine::m_dSessionId = 0;
 
@@ -45,11 +45,9 @@ bool CClientRoutine::ConsoleEventHandler(DWORD dwEvent) {
 	return true;
 }
 
-ClientRoutinePtr CClientRoutine::GetInstance(const int threadCount, const std::string listenPort) {
+CClientRoutine* CClientRoutine::GetInstance(const int threadCount, const std::string listenPort) {
 	if (!currentRoutine) {
-		//Значение currentRoutine присвоится в конструкторе, я зимплементил такое поведение 
-		//т.к. в конструкторе стартуют рабочие потоки в которых нужен уже инициализированный умный указатель currentRoutine
-		new CClientRoutine(threadCount, listenPort);
+		currentRoutine = new CClientRoutine(threadCount, listenPort);
 	}
 	return currentRoutine;
 }
@@ -88,12 +86,10 @@ CClientRoutine::CClientRoutine(int threadCount, const std::string port) :
 		return;
 	}
 
-	currentRoutine.reset(this);
-
 	std::shared_ptr<std::thread> workThread;
 	for (size_t i = 0; i < m_dThreadCount; i++) {
 
-		workThread = std::make_shared<std::thread>(&CClientRoutine::WorkerThread);
+		workThread = std::make_shared<std::thread>(&CClientRoutine::WorkerThread, this);
 
 		m_vWorkerPayloads.push_back(std::move(workThread));
 	}	
@@ -105,7 +101,7 @@ void CClientRoutine::Start() {
 
 	SOCKET sdClient = INVALID_SOCKET;
 	
-	BufferPtr buffer = nullptr;
+	CBuffer* buffer = nullptr;
 
 	g_bEndServer = false;
 
@@ -122,16 +118,16 @@ void CClientRoutine::Start() {
 		}
 
 		//связываем сокет клиента с портом завершения , аллоцируем структуру и добавляем ее в контейнер
-		UpdateCompletionPort(buffer, sdClient);
-		if (buffer == nullptr) {					
-			break;
+		buffer = UpdateCompletionPort(sdClient);
+		if (!buffer) {					
+			continue;
 		}
 
 		//подключился новый клиент - постим мессадж об этом в порт завершения вспомогательного класса обслуживающего соединения с БД
 		//(см. https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html)
-		PostToIOCP(buffer.get());
+		PostToIOCP(buffer);
 
-		buffer.reset();
+		buffer = nullptr;
 	} 
 	
 	
@@ -152,14 +148,16 @@ CClientRoutine::~CClientRoutine() {
 	}
 
 	//Аттачим рабочие птококи с уже завершенными в них рутинами чтобы синхронно и безопасно завершить их работу.
-	for (auto it = m_vWorkerPayloads.begin(); it != m_vWorkerPayloads.end(); ++it) {
+	for (size_t i = 0; i < m_vWorkerPayloads.size(); i++) {
 
-		if (it->get()->joinable() && WaitForSingleObject(it->get()->native_handle(), 500) == WAIT_OBJECT_0) {
-			it->get()->join();
-			it->reset();
+		auto workerThread = m_vWorkerPayloads[i];
+
+		if (workerThread->joinable() && WaitForSingleObject(workerThread->native_handle(), 500) == WAIT_OBJECT_0) {
+			workerThread->join();
+			workerThread.reset();
 		}
 		else {
-			auto threadId = it->get()->get_id();
+			auto threadId = workerThread->get_id();
 
 			std::stringstream ss;
 
@@ -172,7 +170,7 @@ CClientRoutine::~CClientRoutine() {
 
 	//не используем итераторы для динамически изменяемого контейнера, иначе м.б. ошибка когда итератор == nullptr
 	for (size_t i = 0; i < m_mClients.size(); i++) {
-		RemoveSession(m_mClients[i]);
+		RemoveSession(m_mClients[i].get());
 	}
 	m_mClients.clear();
 
@@ -190,10 +188,9 @@ CClientRoutine::~CClientRoutine() {
 	WSACleanup();
 	SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CClientRoutine::ConsoleEventHandler), false);
 
-	currentRoutine.reset();
+	currentRoutine = nullptr;
 }
 
-//Инициализируем сокет, который будет слушать порт к которому будут коннектиться клиенты.
 SOCKET CClientRoutine::CreateSocket(const std::string port, const bool isListenSocket) {
 	SOCKET socket;
 
@@ -246,72 +243,65 @@ SOCKET CClientRoutine::CreateSocket(const std::string port, const bool isListenS
 		return NULL;
 	}
 
-	//устанавливаем размер буфера 0 (SO_SNDBUF).
-	//int nZero = 0;
-	//if(setsockopt(socket, SOL_SOCKET, SO_SNDBUF, (char *)&nZero, sizeof(nZero)) == SOCKET_ERROR ) {
-	//	//m_pLogger->Error("Error: " + WSAGetLastError());
-	//	return NULL;
-	//}
-
 	freeaddrinfo(addrlocal);
 
 	return socket;
 }
 
 //Рабочий поток обрабатывает все оперции чтения и записи в сокете связанным с портом завершения.
-int CClientRoutine::WorkerThread() {
+int CClientRoutine::WorkerThread(CClientRoutine* routine) {
 
-	HANDLE hIOCP = currentRoutine->m_hIOCP;
+	HANDLE hIOCP = routine->m_hIOCP;
 	bool bSuccess = false;
-	BufferPtr buffer = nullptr;
+	CBuffer* buffer = nullptr;
 	LPWSAOVERLAPPED lpOverlapped = nullptr;
 
 	DWORD dwIoSize = 0;
 	
 	while(true) {
 		
-        //присоединяем текущий поток к пулу потоков порта завершения, который был создан ранее ОС. Функция блокирует поток, если в очереди отсутствуют запросы.
+        //присоединяем текущий поток к пулу потоков порта завершения, который был создан ранее ОС. Функция блокирует поток, если в очередь потрта завершения пуста.
 		bSuccess = GetQueuedCompletionStatus(hIOCP, &dwIoSize, reinterpret_cast<PDWORD_PTR>(&buffer), &lpOverlapped, INFINITE);
-		if (g_bEndServer || !buffer.get()) {
+		if (g_bEndServer || !buffer) {
 			//выходим из цикла и заканчиваем синхронно работу - в деструкторе этот поток аттачится к главному.
 			break;
 		}
 
 		if (!bSuccess || (bSuccess && (dwIoSize == 0))) {
 			//соединение с клиентом разорвано
-			currentRoutine->RemoveSession(buffer);
+			routine->RemoveSession(buffer);
 			continue;
 		}
 
 		switch(buffer->IOOperation ) {
 		case WriteToClient:
 			//Клиент считал буфер из сокета - инициируем асинхронное чтение данных от клиента
-			currentRoutine->OnClientDataSended(buffer);
+			routine->OnClientDataSended(buffer);
 			break;
 		case ReadFromIOCP:
 			//Получили пакет от клиента - шлем его ч/з рутину, обслуживающую соединения с БД 
 			buffer->nTotalBytes = dwIoSize;
-			currentRoutine->OnClientDataReceived(buffer);
+			routine->OnClientDataReceived(buffer);
 			break;
 		case SendToClient:
 			//Ответ из БД получен ч/з рутину, обслуживающуюу БД, шлем его асинхронно клиенту.
-			currentRoutine->OnMySQLDataReceived(buffer);
+			routine->OnMySQLDataReceived(buffer);
 			break;
 		case ErrorInDB:
-			currentRoutine->RemoveSession(buffer);
+			routine->RemoveSession(buffer);
 			break;
 		default:
-			currentRoutine->m_pLogger->Error("Incorrect sequence.");
+			routine->m_pLogger->Error("Incorrect sequence.");
 		}
 
-		buffer.reset();
+		buffer = nullptr;
 		lpOverlapped = nullptr;
 	}
 
 	return 0;
 }
 
-void CClientRoutine::OnClientDataSended(BufferPtr buffer) {
+void CClientRoutine::OnClientDataSended(CBuffer* buffer) {
 
 	buffer->IOOperation = ReadFromIOCP;
 
@@ -322,7 +312,7 @@ void CClientRoutine::OnClientDataSended(BufferPtr buffer) {
 	}
 }
 
-void CClientRoutine::OnClientDataReceived(BufferPtr buffer) {
+void CClientRoutine::OnClientDataReceived(CBuffer* buffer) {
 
 	buffer->IOOperation = ReadFromClient;
 
@@ -330,10 +320,10 @@ void CClientRoutine::OnClientDataReceived(BufferPtr buffer) {
 
 	m_pLogger->Write(buffer);
 
-	PostToIOCP(buffer.get());
+	PostToIOCP(buffer);
 }
 
-void CClientRoutine::OnMySQLDataReceived(BufferPtr buffer) {
+void CClientRoutine::OnMySQLDataReceived(CBuffer* buffer) {
 
 	buffer->IOOperation = WriteToClient;
 
@@ -346,12 +336,12 @@ void CClientRoutine::OnMySQLDataReceived(BufferPtr buffer) {
 
 bool CClientRoutine::PostToIOCP(CBuffer* buffer) {
 
-	size_t size = sizeof(*buffer);
-	return PostQueuedCompletionStatus(m_hMySQLIOCP, size, (DWORD)(buffer), &(buffer->overlapped));
+	size_t size = sizeof(buffer);
+	return PostQueuedCompletionStatus(m_hMySQLIOCP, size, reinterpret_cast<DWORD>(buffer), &(buffer->overlapped));
 
 }
 
-bool CClientRoutine::RecvBufferAsync(BufferPtr buffer) {
+bool CClientRoutine::RecvBufferAsync(CBuffer* buffer) {
 
 	LPWSAOVERLAPPED pOverlapped = &buffer->overlapped;
 	DWORD totalBytes = 0;
@@ -371,13 +361,13 @@ bool CClientRoutine::RecvBufferAsync(BufferPtr buffer) {
 	return true;
 }
 
-bool CClientRoutine::SendBufferAsync(const BufferPtr buffer) {
+bool CClientRoutine::SendBufferAsync(const CBuffer* buffer) {
 	
-	BufferPtr pBuffer = GetNextBuffer();
+	CBuffer* pBuffer = GetNextBuffer();
 
 	while (pBuffer) {
 		//нам нужно следить чтобы за раз только один тред мог вызывать WSASaend для сокета клиента.
-		std::lock_guard<std::mutex> lock(buffer->m_mClientSync);
+		std::lock_guard<std::mutex> lock(pBuffer->m_mClientSync);
 
 		LPWSAOVERLAPPED pOverlapped = &pBuffer->overlapped;
 
@@ -402,38 +392,42 @@ bool CClientRoutine::SendBufferAsync(const BufferPtr buffer) {
 }
 
 //Аллоцирует контекст для сокета для нового соединения и связывает сокет с портом завершения.
-void CClientRoutine::UpdateCompletionPort(BufferPtr& buffer, const SOCKET sdClient) {
+CBuffer* CClientRoutine::UpdateCompletionPort(const SOCKET sdClient) {
 
-	buffer.reset(new CBuffer(sdClient));
-	if (!buffer.get()) {
-		return;
-	}
+	CBuffer* buffer = new CBuffer(sdClient);
 		
-	//свзыввем хендл сокета клиента с портом завершения, иными словами оповещаем порт завершения о том что хотим наблюдать за этим сокетом
-	m_hIOCP = CreateIoCompletionPort(reinterpret_cast<HANDLE>(sdClient), m_hIOCP, reinterpret_cast<DWORD_PTR>(buffer.get()), 0);
+	m_hIOCP = CreateIoCompletionPort(reinterpret_cast<HANDLE>(sdClient), m_hIOCP, reinterpret_cast<DWORD_PTR>(buffer), 0);
 	if(!m_hIOCP) {
 		
 		m_pLogger->Error("CreateIoCompletionPort() failed: " + GetLastError());
 
-		buffer.reset();
-		return;
+		if (buffer) {
+			delete buffer;
+		};
+		return nullptr;
 	}
+
+	AddNewSession(buffer);
+	AddBufferInQueue(buffer);
+
+	return buffer;
+}
+
+void CClientRoutine::AddNewSession(CBuffer* buffer) {
+
+	std::lock_guard<std::mutex> lock(m_mBufferSync);
 
 	buffer->m_dSessionId = m_dSessionId++;
 
-	AddBufferInQueue(buffer);
-	AddNewSession(buffer);
-}
+	std::shared_ptr<CBuffer> newBuffer;
 
-void CClientRoutine::AddNewSession(const BufferPtr buffer) {
-
-	std::lock_guard<std::mutex> lock(m_mBufferSync);
+	newBuffer.reset(buffer);
 	
-	m_mClients.insert(std::pair<size_t, BufferPtr>(buffer->m_dSessionId, std::move(buffer)));
+	m_mClients.insert(std::pair<size_t, BufferPtr>(buffer->m_dSessionId, std::move(newBuffer)));
 
 }
 
-BufferPtr CClientRoutine::GetNextBuffer() {
+CBuffer* CClientRoutine::GetNextBuffer() {
 
 	std::lock_guard<std::mutex> lock(m_mBufferSync);
 	auto removedItemIt = std::find(m_vRemovedBufferNumbers.begin(), m_vRemovedBufferNumbers.end(), m_dOutgoingSequence);
@@ -443,7 +437,7 @@ BufferPtr CClientRoutine::GetNextBuffer() {
 		InterlockedIncrement(&m_dOutgoingSequence);
 	}
 
-	BufferPtr nextPtr = nullptr;
+	CBuffer* nextPtr = nullptr;
 	auto it = m_mBuffer.begin();
 
 	if (it != m_mBuffer.end() && it->second != nullptr && it->second->sequenceNumber == m_dOutgoingSequence 
@@ -456,13 +450,13 @@ BufferPtr CClientRoutine::GetNextBuffer() {
 	return nextPtr;
 }
 
-BufferPtr CClientRoutine::ProcessNextBuffer() {
+CBuffer* CClientRoutine::ProcessNextBuffer() {
 
 	std::lock_guard<std::mutex> lock(m_mBufferSync);
 
 	InterlockedIncrement(&m_dOutgoingSequence);
 
-	BufferPtr nextPtr = nullptr;
+	CBuffer* nextPtr = nullptr;
 
 	auto it = m_mBuffer.begin();
 
@@ -484,14 +478,12 @@ void CClientRoutine::RemoveBufferFromQueue(BufferPtr buffer) {
 
 		m_vRemovedBufferNumbers.push_back(it->first);
 
-		buffer.reset();
-
 		m_mBuffer.erase(it);
 		
 	}
 }
 
-void CClientRoutine::AddBufferInQueue(const BufferPtr buffer) {
+void CClientRoutine::AddBufferInQueue(CBuffer* buffer) {
 
 	std::lock_guard<std::mutex> lock(m_mBufferSync);
 
@@ -499,21 +491,23 @@ void CClientRoutine::AddBufferInQueue(const BufferPtr buffer) {
 
 	buffer->sequenceNumber = m_dIncomingSequence;
 
-	m_mBuffer.insert(std::pair<size_t, BufferPtr>(m_dIncomingSequence, buffer));
+	m_mBuffer.insert(std::pair<size_t, CBuffer*>(m_dIncomingSequence, buffer));
 
 }
 
-void CClientRoutine::RemoveSession(BufferPtr buffer) {
+void CClientRoutine::RemoveSession(const CBuffer* buffer) {
 
 	std::lock_guard<std::mutex> lock(m_mBufferSync);
 
-	auto it = m_mClients.find(buffer->m_dSessionId);
+	size_t sessionId = buffer->m_dSessionId;
+
+	auto it = m_mClients.find(sessionId);
 			
 	if (it != m_mClients.end()) {
 
 		RemoveBufferFromQueue(it->second);
 
-		buffer.reset();
+		it->second.reset();
 
 		m_mClients.erase(it);
 	}

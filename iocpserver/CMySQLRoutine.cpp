@@ -6,7 +6,7 @@
 
 
 extern bool g_bEndServer;// установитс€ в true в обработчиках событий консоли в рабочих рутинах
-MySQLRoutinePtr CMySQLRoutine::currentRoutine = nullptr;
+CMySQLRoutine* CMySQLRoutine::currentRoutine = nullptr;
 
 static std::mutex printMutex;
 
@@ -37,11 +37,10 @@ bool CMySQLRoutine::ConsoleEventHandler(DWORD dwEvent) {
 	return true;
 }
 
-MySQLRoutinePtr CMySQLRoutine::GetInstance(const int threadCount, const std::string listenPort) {
+CMySQLRoutine* CMySQLRoutine::GetInstance(const int threadCount, const std::string listenPort) {
 	if (!currentRoutine) {
-		//«начение currentRoutine присвоитс€ в конструкторе, € зимплементил такое поведение 
-		//т.к. в конструкторе стартуют рабочие потоки в которых нужен уже инициализированный умный указатель currentRoutine
-		new CMySQLRoutine(threadCount, listenPort);
+
+		currentRoutine = new CMySQLRoutine(threadCount, listenPort);
 	}
 	return currentRoutine;
 }
@@ -72,12 +71,10 @@ CMySQLRoutine::CMySQLRoutine(const int threadCount,const std::string mySQLPort) 
 		return;
 	}
 
-	currentRoutine.reset(this);
-
 	std::shared_ptr<std::thread> workThread;
 	for (size_t i = 0; i < m_dThreadCount; i++) {
 
-		workThread = std::make_shared<std::thread>(&CMySQLRoutine::WorkerThread);
+		workThread = std::make_shared<std::thread>(&CMySQLRoutine::WorkerThread, this);
 
 		m_vWorkerPayloads.push_back(std::move(workThread));
 	}
@@ -123,7 +120,7 @@ CMySQLRoutine::~CMySQLRoutine() {
 	WSACleanup();
 	SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(CMySQLRoutine::ConsoleEventHandler), false);
 
-	currentRoutine.reset();
+	currentRoutine = nullptr;
 }
 
 //»нициализируем сокет, который будет слушать порт к которому будут коннектитьс€ клиенты.
@@ -178,52 +175,52 @@ SOCKET CMySQLRoutine::CreateSocket(std::string port) {
 }
 
 
-int CMySQLRoutine::WorkerThread() {
+int CMySQLRoutine::WorkerThread(CMySQLRoutine* routine) {
 
-	HANDLE hIOCP = currentRoutine->m_hIOCP;
+	HANDLE hIOCP = routine->m_hIOCP;
 	bool bSuccess = false;
 
 	LPWSAOVERLAPPED lpOverlapped = nullptr;
-	BufferPtr buffer;
+	CBuffer* buffer;
 	DWORD dwIoSize = 0;
 
 	while (true) {
 
 		//—читываем из очереди сообщени€-данные. ¬ызов этой функции блокирует поток до тех пор пока она не считает данные из очереди.
 		bSuccess = GetQueuedCompletionStatus(hIOCP, &dwIoSize, reinterpret_cast<PDWORD_PTR>(&buffer), &lpOverlapped, INFINITE);
-		if (g_bEndServer || !buffer.get()) {
+		if (g_bEndServer || !buffer) {
 			//выходим из цикла и заканчиваем синхронно работу - в деструкторе этот поток аттачитс€ к главному.
 			break;
 		}
 
 		if (!bSuccess || (bSuccess && (dwIoSize == 0))) {
 			buffer->IOOperation = ErrorInDB;
-			currentRoutine->PostToIOCP(buffer.get());
+			routine->PostToIOCP(buffer);
 			continue;
 		}
 		
 		switch (buffer->IOOperation) {
 		case AcceptClient:
 			//клиент подключилс€ -  коннектимс€ к Ѕƒ, читаем запрос и шлем ответ клиенту ч/з клиентскую рутину.
-			currentRoutine->OnClientAccepted(buffer);
+			routine->OnClientAccepted(buffer);
 			break;
 
 		case ReadFromClient:
 			//считали ответ от клиента - шлем его в Ѕƒ, читаем ответ и шлем обратно ч/з клиентскую рутину
-			currentRoutine->OnClientDataReceived(buffer);
+			routine->OnClientDataReceived(buffer);
 			break;
 		default:
-			currentRoutine->m_pLogger->Error("Incorrect sequence" );
+			routine->m_pLogger->Error("Incorrect sequence" );
 			break;
 		}
 
-		buffer.reset();
+		buffer = nullptr;
 		lpOverlapped = nullptr;
 	}
 	return 0;
 }
 
-void CMySQLRoutine::OnClientAccepted(BufferPtr buffer) {
+void CMySQLRoutine::OnClientAccepted(CBuffer* buffer) {
 	buffer->m_dMySQLSocket = CreateSocket(m_sMySQLPort);
 	buffer->IOOperation = SendToClient;
 
@@ -231,40 +228,41 @@ void CMySQLRoutine::OnClientAccepted(BufferPtr buffer) {
 	{
 		m_pLogger->Error("Error..." );
 		buffer->IOOperation = ErrorInDB;
-		PostToIOCP(buffer.get());
+		PostToIOCP(buffer);
 		return;
 	}
 	RecvBuffer(buffer->m_dMySQLSocket, buffer);
 
-	PostToIOCP(buffer.get());
+	PostToIOCP(buffer);
 }
-void CMySQLRoutine::OnClientDataReceived(BufferPtr buffer) {
+
+void CMySQLRoutine::OnClientDataReceived(CBuffer* buffer) {
 	buffer->IOOperation = SendToClient;
 
 	if (!SendBuffer(buffer->m_dMySQLSocket, buffer)) {
 		m_pLogger->Error("MySQL Send failed: " + WSAGetLastError() );
 		buffer->IOOperation = ErrorInDB;
-		PostToIOCP(buffer.get());
+		PostToIOCP(buffer);
 		return;
 	}
 
 	if (!RecvBuffer(buffer->m_dMySQLSocket, buffer)) {
 		m_pLogger->Error("MySQL Receive failed: " + WSAGetLastError() );
 		buffer->IOOperation = ErrorInDB;
-		PostToIOCP(buffer.get());
+		PostToIOCP(buffer);
 		return;
 	}
 
-	PostToIOCP(buffer.get());
+	PostToIOCP(buffer);
 }
 
 bool CMySQLRoutine::PostToIOCP(CBuffer* bufferPtr) {
 	
-	size_t size = sizeof(*bufferPtr);
-	return PostQueuedCompletionStatus(m_hClientIOCP, size, (DWORD)(bufferPtr), &(bufferPtr->overlapped));
+	size_t size = sizeof(bufferPtr);
+	return PostQueuedCompletionStatus(m_hClientIOCP, size, reinterpret_cast<DWORD>(bufferPtr), &(bufferPtr->overlapped));
 }
 
-bool CMySQLRoutine::RecvBuffer(SOCKET recvSocket, BufferPtr buffer) {
+bool CMySQLRoutine::RecvBuffer(SOCKET recvSocket, CBuffer* buffer) {
 
 	DWORD dwFlags = 0;
 	LPWSABUF buffRecv = &buffer->wsabuf;
@@ -272,24 +270,30 @@ bool CMySQLRoutine::RecvBuffer(SOCKET recvSocket, BufferPtr buffer) {
 	buffRecv->buf = buffer->buffer;
 	buffRecv->len = MAX_BUFF_SIZE;
 
-	while ((buffer->nTotalBytes = recv(recvSocket, buffRecv->buf, buffRecv->len, dwFlags)) == MAX_BUFF_SIZE) {
+	buffer->nTotalBytes = recv(recvSocket, buffRecv->buf, buffRecv->len, dwFlags);
 
-		m_pLogger->Write(buffer);
+	if (buffer->nTotalBytes == SOCKET_ERROR || buffer->nTotalBytes == 0) {
+		return false;
+	}
+
+	while (buffer->nTotalBytes == MAX_BUFF_SIZE) {
 
 		//напр€мую пишем в сокет клиента большие данные
 		if (!SendBuffer(buffer->m_dClientSocket, buffer)) {
 			return false;
 		}
 
-		buffRecv->buf = buffer->buffer;
-	}
+		buffer->nTotalBytes = recv(recvSocket, buffRecv->buf, buffRecv->len, dwFlags);
 
-	m_pLogger->Write(buffer);
+		if (buffer->nTotalBytes == SOCKET_ERROR || buffer->nTotalBytes == 0) {
+			return false;
+		}
+	}
 
 	return true;
 }
 
-bool CMySQLRoutine::SendBuffer(SOCKET sendSocket, BufferPtr buffer) {
+bool CMySQLRoutine::SendBuffer(SOCKET sendSocket, CBuffer* buffer) {
 
 	LPWSABUF buffSend = &buffer->wsabuf;
 	buffSend->buf = buffer->buffer;
